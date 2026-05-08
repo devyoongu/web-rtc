@@ -6,5 +6,7 @@ window.APP_CONFIG = {
   sipPassword: 'secret1003',
   callExtension: '2001',
   ttsBackend: 'http://localhost:8000/tts',
+  eventsBackend: 'http://localhost:8000/events',
+  recvBase: 'http://localhost:8000',
   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
 };

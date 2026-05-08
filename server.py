@@ -1,14 +1,21 @@
 """
-web-rtc/server.py — TTS 프록시 백엔드
+web-rtc/server.py — TTS 프록시 백엔드 + 콜봇 응답 SSE
 
 브라우저는 GCP 키를 직접 호출할 수 없으므로 이 서버가 중계한다.
 callbot/tts.py 의 GoogleTTS 를 그대로 임포트해서 재사용.
 
 Endpoints:
   POST /tts  body={"text": "..."}  → audio/wav (8kHz 16-bit mono PCM)
-              ulaw 의 네이티브 레이트와 일치시켜 브라우저 AudioContext / WebRTC
-              인코더의 리샘플링 단계를 제거 → 콜봇 STT 인식률 향상.
+              송신용. wav/sent/ 에 자동 저장.
+  GET  /events                       → text/event-stream
+              callbot 로그(/tmp/callbot.log) 를 tail 하여 'TTS enqueue' 라인을
+              파싱, 콜봇 응답 텍스트를 SSE 로 push. 각 응답 텍스트의 8kHz WAV
+              를 wav/recv/ 에 미리 합성/저장하고, 파일 URL 을 함께 전달.
+  GET  /wav/recv/{name}              → 위 응답 wav 파일 정적 서빙
 """
+import asyncio
+import json
+import os
 import re
 import struct
 import sys
@@ -17,7 +24,8 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 # ../callbot 을 import path 에 추가하고 그대로 모듈 재사용
@@ -30,9 +38,18 @@ import config as cfg  # noqa: E402
 
 SAMPLE_RATE = 8000
 
-# 입력 텍스트별 합성 결과 WAV 보관 폴더 (디버깅/검증용).
-# callbot/tts.py 의 cache(wav/_cache/) 와 별도. .gitignore 의 wav/ 로 제외됨.
-SENT_DIR = Path(__file__).resolve().parent / "wav" / "sent"
+# 송신/수신 WAV 보관 폴더 — callbot/tts.py 의 cache(wav/_cache/) 와 별도.
+# .gitignore 의 wav/ 로 제외됨.
+_BASE_DIR = Path(__file__).resolve().parent
+SENT_DIR = _BASE_DIR / "wav" / "sent"
+RECV_DIR = _BASE_DIR / "wav" / "recv"
+
+# 콜봇 로그 경로 — main.py 를 `> /tmp/callbot.log 2>&1` 로 띄우는 패턴 가정.
+# 환경에 맞게 CALLBOT_LOG_PATH 환경변수로 override.
+LOG_PATH = Path(os.environ.get("CALLBOT_LOG_PATH", "/tmp/callbot.log"))
+
+# callbot 의 'TTS enqueue:' 로그 라인 파싱.
+TTS_ENQUEUE_RE = re.compile(r"TTS enqueue: '(.+?)'")
 
 app = FastAPI(title="web-rtc TTS proxy")
 
@@ -43,13 +60,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# /wav/recv/ 정적 서빙 — 봇 응답 wav 재생용.
+RECV_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/wav/recv", StaticFiles(directory=RECV_DIR), name="recv")
 
-def _save_sent_wav(wav: bytes, text: str) -> Path:
-    SENT_DIR.mkdir(parents=True, exist_ok=True)
+
+def _save_wav(wav: bytes, text: str, target_dir: Path) -> Path:
+    target_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     # 파일명에 안전한 문자만 남김 (한글/영숫자/공백 → _)
     snippet = re.sub(r"[^\w가-힣]+", "_", text[:30]).strip("_") or "empty"
-    path = SENT_DIR / f"{ts}-{snippet}.wav"
+    path = target_dir / f"{ts}-{snippet}.wav"
     path.write_bytes(wav)
     return path
 
@@ -90,9 +111,60 @@ def synthesize(req: TTSRequest):
     # 디스크 캐시(wav/_cache/) 적용으로 동일 텍스트 재요청 시 GCP 호출 없음.
     pcm_8k = synthesize_pcm_8k(text)
     wav = _wrap_pcm_in_wav(pcm_8k, SAMPLE_RATE)
-    saved = _save_sent_wav(wav, text)
-    print(f"[TTS] Saved: {saved.relative_to(Path(__file__).resolve().parent)} ({len(wav)} bytes)")
+    saved = _save_wav(wav, text, SENT_DIR)
+    print(f"[TTS] Sent saved: {saved.relative_to(_BASE_DIR)} ({len(wav)} bytes)")
     return Response(content=wav, media_type="audio/wav")
+
+
+def _prefetch_recv_wav(text: str) -> Path | None:
+    """봇 응답 텍스트의 8k WAV 를 미리 합성/저장. 파일 경로 반환."""
+    try:
+        pcm_8k = synthesize_pcm_8k(text)
+        wav = _wrap_pcm_in_wav(pcm_8k, SAMPLE_RATE)
+        saved = _save_wav(wav, text, RECV_DIR)
+        print(f"[Events] Recv saved: {saved.relative_to(_BASE_DIR)} ({len(wav)} bytes)")
+        return saved
+    except Exception as e:
+        print(f"[Events] prefetch failed for {text[:30]!r}: {e}")
+        return None
+
+
+@app.get("/events")
+async def events():
+    """
+    callbot 로그를 tail 하여 'TTS enqueue: <text>' 이벤트를 SSE 로 push.
+
+    각 이벤트:
+      data: {"text": "...", "url": "/wav/recv/<file>.wav"}
+    """
+    if not LOG_PATH.exists():
+        raise HTTPException(status_code=404, detail=f"log not found: {LOG_PATH}")
+
+    async def stream():
+        f = LOG_PATH.open("r", encoding="utf-8", errors="replace")
+        f.seek(0, 2)  # tail-end
+        try:
+            # 클라이언트에 즉시 헤더 flush 시킬 keep-alive ping
+            yield ": connected\n\n"
+            while True:
+                line = f.readline()
+                if not line:
+                    await asyncio.sleep(0.5)
+                    continue
+                m = TTS_ENQUEUE_RE.search(line)
+                if not m:
+                    continue
+                text = m.group(1)
+                # GCP 호출이 동기라 event loop 블로킹 방지
+                saved = await asyncio.to_thread(_prefetch_recv_wav, text)
+                payload = {"text": text}
+                if saved is not None:
+                    payload["url"] = f"/wav/recv/{saved.name}"
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+        finally:
+            f.close()
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
 
 
 if __name__ == "__main__":

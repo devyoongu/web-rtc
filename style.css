@@ -72,18 +72,26 @@ audio { width: 100%; margin-top: 12px; }
   display: flex;
   align-items: center;
   gap: 8px;
-  align-self: flex-end;
   max-width: 80%;
 }
+.bubble.user { align-self: flex-end; }
+.bubble.bot  { align-self: flex-start; }
 .bubble .text {
-  background: #2a6df4;
-  color: #fff;
   padding: 8px 14px;
-  border-radius: 16px 16px 4px 16px;
   font-size: 14px;
   line-height: 1.45;
   word-break: break-word;
   white-space: pre-wrap;
+}
+.bubble.user .text {
+  background: #2a6df4;
+  color: #fff;
+  border-radius: 16px 16px 4px 16px;
+}
+.bubble.bot .text {
+  background: #e8eaf0;
+  color: #1c1d22;
+  border-radius: 16px 16px 16px 4px;
 }
 .bubble .play-btn {
   flex: 0 0 auto;
@@ -91,8 +99,6 @@ audio { width: 100%; margin-top: 12px; }
   height: 28px;
   border-radius: 50%;
   background: #fff;
-  border: 1px solid #2a6df4;
-  color: #2a6df4;
   font-size: 11px;
   padding: 0;
   display: inline-flex;
@@ -100,8 +106,13 @@ audio { width: 100%; margin-top: 12px; }
   justify-content: center;
   cursor: pointer;
 }
-.bubble .play-btn:hover { background: #2a6df4; color: #fff; }
-.bubble .play-btn.playing { background: #2a6df4; color: #fff; }
+.bubble.user .play-btn { border: 1px solid #2a6df4; color: #2a6df4; }
+.bubble.user .play-btn:hover,
+.bubble.user .play-btn.playing { background: #2a6df4; color: #fff; }
+.bubble.bot .play-btn { border: 1px solid #8a8f9a; color: #555; }
+.bubble.bot .play-btn:hover,
+.bubble.bot .play-btn.playing { background: #555; color: #fff; }
+.bubble .play-btn:disabled { opacity: .35; cursor: not-allowed; }
 
 /* ── Log (collapsible) ───────────────────────────────── */
 .log-details { margin-top: 16px; }

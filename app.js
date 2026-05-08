@@ -30,21 +30,27 @@
   };
 
   // ── 채팅 말풍선 ─────────────────────────────────────────────────
-  // 사용자가 보낸 텍스트를 우측 정렬 말풍선으로 추가하고, 말풍선 옆 ▶ 버튼을
-  // 누르면 송신된 TTS WAV 를 스피커로 재생 (통화 미디어와 별개).
-  const addUserBubble = (text, audioUrl) => {
+  // user(우측): 사용자가 보낸 텍스트 + ▶ 버튼 (송신된 WAV 재생)
+  // bot(좌측): 콜봇 응답 텍스트(/events SSE) + ▶ 버튼 (응답 WAV 재생)
+  const addBubble = (kind, text, audioUrl) => {
     const row = document.createElement('div');
-    row.className = 'bubble';
+    row.className = `bubble ${kind}`;
 
     const btn = document.createElement('button');
     btn.className = 'play-btn';
     btn.type = 'button';
     btn.textContent = '▶';
-    btn.title = '송신된 TTS 음성 재생';
+    btn.title = (kind === 'user' ? '송신된' : '응답된') + ' TTS 음성 재생';
 
-    const audio = new Audio(audioUrl);
-    audio.addEventListener('ended', () => { btn.classList.remove('playing'); btn.textContent = '▶'; });
+    const audio = audioUrl ? new Audio(audioUrl) : null;
+    if (audio) {
+      audio.addEventListener('ended', () => { btn.classList.remove('playing'); btn.textContent = '▶'; });
+    } else {
+      btn.disabled = true;
+      btn.title = '재생 불가 (WAV 미수신)';
+    }
     btn.addEventListener('click', () => {
+      if (!audio) return;
       if (!audio.paused) {
         audio.pause(); audio.currentTime = 0;
         btn.classList.remove('playing'); btn.textContent = '▶';
@@ -61,10 +67,43 @@
     txt.className = 'text';
     txt.textContent = text;
 
-    row.appendChild(btn);
-    row.appendChild(txt);
+    // user: [▶] [text]   bot: [text] [▶]
+    if (kind === 'user') {
+      row.appendChild(btn);
+      row.appendChild(txt);
+    } else {
+      row.appendChild(txt);
+      row.appendChild(btn);
+    }
     els.chat.appendChild(row);
     els.chat.scrollTop = els.chat.scrollHeight;
+  };
+
+  const addUserBubble = (text, audioUrl) => addBubble('user', text, audioUrl);
+  const addBotBubble = (text, audioUrl) => addBubble('bot', text, audioUrl);
+
+  // ── 콜봇 응답 SSE 구독 ─────────────────────────────────────────
+  // 서버(/events) 가 callbot 로그의 'TTS enqueue:' 라인을 push.
+  // 동일 텍스트가 짧은 시간에 중복 도착하는 경우 한 번만 표시.
+  let _lastBotKey = '';
+  const startEvents = () => {
+    try {
+      const es = new EventSource(cfg.eventsBackend);
+      es.onmessage = (e) => {
+        if (!e.data) return;
+        let data;
+        try { data = JSON.parse(e.data); } catch { return; }
+        if (!data.text) return;
+        const key = data.text + '|' + (data.url || '');
+        if (key === _lastBotKey) return;
+        _lastBotKey = key;
+        const url = data.url ? cfg.recvBase + data.url : null;
+        addBotBubble(data.text, url);
+      };
+      es.onerror = () => log('Events stream error (will auto-retry)');
+    } catch (e) {
+      log('Events init failed', e.message);
+    }
   };
 
   // ── AudioContext / TTS-as-mic 파이프라인 ──────────────────────────
@@ -222,4 +261,6 @@
 
   ua.start();
   log('UA started, target', wsUri);
+
+  startEvents();
 })();

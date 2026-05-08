@@ -40,7 +40,10 @@
     </details>
   </main>
 
-  <script src="config.js"></script>
-  <script src="app.js"></script>
+  <script>
+    // 개발 중 캐시 무력화. 운영에서는 빌드 hash 로 교체.
+    document.write(`<script src="config.js?v=${Date.now()}"><\/script>`);
+    document.write(`<script src="app.js?v=${Date.now()}"><\/script>`);
+  </script>
 </body>
 </html>
