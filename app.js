@@ -37,7 +37,9 @@
 
   const ensureAudioPipeline = async () => {
     if (!audioCtx) {
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      // sampleRate: 8000 — ulaw 네이티브 레이트와 일치시켜 브라우저 내부 보간 단계 제거.
+      // 서버가 8kHz WAV 를 내려주므로 decodeAudioData 도 리샘플링 없이 통과.
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 8000 });
       micDest = audioCtx.createMediaStreamDestination();
     }
     if (audioCtx.state === 'suspended') {
