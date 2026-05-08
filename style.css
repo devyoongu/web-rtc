@@ -1,0 +1,63 @@
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  background: #f5f6fa;
+  color: #1c1d22;
+}
+main {
+  max-width: 720px;
+  margin: 32px auto;
+  padding: 24px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.08);
+}
+h1 { margin: 0 0 16px; font-size: 22px; }
+h2 { margin: 24px 0 8px; font-size: 14px; color: #555; text-transform: uppercase; letter-spacing: .04em; }
+
+.status { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  background: #ddd; color: #333;
+}
+.badge[data-state="registered"] { background: #d3f4dd; color: #1d6b34; }
+.badge[data-state="connected"]  { background: #e3f0ff; color: #1d4f8b; }
+.badge[data-state="connecting"] { background: #fff4cc; color: #8a6500; }
+.badge[data-state="in-call"]    { background: #b8e8c4; color: #0e5828; }
+.badge[data-state="register-failed"], .badge[data-state="disconnected"] { background: #fcdada; color: #8a1d1d; }
+.meta { font-size: 12px; color: #666; }
+
+.controls, .say { display: flex; gap: 8px; margin: 12px 0; }
+.say input { flex: 1; padding: 10px 12px; border: 1px solid #ccd; border-radius: 8px; font-size: 14px; }
+button {
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 8px;
+  background: #2a6df4;
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+}
+button:disabled { opacity: .4; cursor: not-allowed; }
+button#hangupBtn { background: #d04a4a; }
+
+audio { width: 100%; margin-top: 12px; }
+
+.log pre {
+  background: #0e1117;
+  color: #d8e0ea;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  margin: 0;
+}

@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>WebRTC Callbot Client</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/jssip@3/dist/jssip.min.js"></script>
+</head>
+<body>
+  <main>
+    <h1>WebRTC Callbot</h1>
+
+    <section class="status">
+      <span class="badge" id="statusBadge" data-state="disconnected">Disconnected</span>
+      <span class="meta" id="statusMeta"></span>
+    </section>
+
+    <section class="controls">
+      <button id="callBtn">Call 2001</button>
+      <button id="hangupBtn" disabled>Hang up</button>
+    </section>
+
+    <section class="say">
+      <input
+        id="textInput"
+        type="text"
+        placeholder="콜봇에게 보낼 문장 입력 후 Send (통화 중일 때만 활성)"
+        disabled
+      />
+      <button id="sendBtn" disabled>Send</button>
+    </section>
+
+    <audio id="remoteAudio" autoplay playsinline></audio>
+
+    <section class="log">
+      <h2>Log</h2>
+      <pre id="log"></pre>
+    </section>
+  </main>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
