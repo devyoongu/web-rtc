@@ -14,7 +14,6 @@ main {
   box-shadow: 0 1px 4px rgba(0,0,0,.08);
 }
 h1 { margin: 0 0 16px; font-size: 22px; }
-h2 { margin: 24px 0 8px; font-size: 14px; color: #555; text-transform: uppercase; letter-spacing: .04em; }
 
 .status { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
 .badge {
@@ -50,14 +49,78 @@ button#hangupBtn { background: #d04a4a; }
 
 audio { width: 100%; margin-top: 12px; }
 
-.log pre {
+/* ── 채팅 영역 ─────────────────────────────────────────── */
+.chat {
+  height: 360px;
+  overflow-y: auto;
+  border: 1px solid #e0e3eb;
+  border-radius: 12px;
+  padding: 12px;
+  margin: 12px 0;
+  background: #fafbff;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.chat:empty::before {
+  content: "통화 후 메시지를 보내면 여기에 표시됩니다.";
+  color: #9aa1ad;
+  font-size: 13px;
+  margin: auto;
+}
+.bubble {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-end;
+  max-width: 80%;
+}
+.bubble .text {
+  background: #2a6df4;
+  color: #fff;
+  padding: 8px 14px;
+  border-radius: 16px 16px 4px 16px;
+  font-size: 14px;
+  line-height: 1.45;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+.bubble .play-btn {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid #2a6df4;
+  color: #2a6df4;
+  font-size: 11px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.bubble .play-btn:hover { background: #2a6df4; color: #fff; }
+.bubble .play-btn.playing { background: #2a6df4; color: #fff; }
+
+/* ── Log (collapsible) ───────────────────────────────── */
+.log-details { margin-top: 16px; }
+.log-details summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: #555;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  padding: 4px 0;
+}
+.log-details pre {
   background: #0e1117;
   color: #d8e0ea;
   padding: 12px;
   border-radius: 8px;
   font-size: 12px;
-  height: 240px;
+  height: 200px;
   overflow: auto;
   white-space: pre-wrap;
-  margin: 0;
+  margin: 8px 0 0;
 }

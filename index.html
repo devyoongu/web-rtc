@@ -20,6 +20,8 @@
       <button id="hangupBtn" disabled>Hang up</button>
     </section>
 
+    <section class="chat" id="chat" aria-label="대화 내역"></section>
+
     <section class="say">
       <input
         id="textInput"
@@ -32,10 +34,10 @@
 
     <audio id="remoteAudio" autoplay playsinline></audio>
 
-    <section class="log">
-      <h2>Log</h2>
+    <details class="log-details">
+      <summary>Log</summary>
       <pre id="log"></pre>
-    </section>
+    </details>
   </main>
 
   <script src="config.js"></script>

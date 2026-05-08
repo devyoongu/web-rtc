@@ -10,6 +10,7 @@
     textInput: document.getElementById('textInput'),
     sendBtn: document.getElementById('sendBtn'),
     remoteAudio: document.getElementById('remoteAudio'),
+    chat: document.getElementById('chat'),
     log: document.getElementById('log'),
   };
 
@@ -26,6 +27,44 @@
     els.badge.dataset.state = state;
     els.badge.textContent = state;
     els.meta.textContent = meta;
+  };
+
+  // ── 채팅 말풍선 ─────────────────────────────────────────────────
+  // 사용자가 보낸 텍스트를 우측 정렬 말풍선으로 추가하고, 말풍선 옆 ▶ 버튼을
+  // 누르면 송신된 TTS WAV 를 스피커로 재생 (통화 미디어와 별개).
+  const addUserBubble = (text, audioUrl) => {
+    const row = document.createElement('div');
+    row.className = 'bubble';
+
+    const btn = document.createElement('button');
+    btn.className = 'play-btn';
+    btn.type = 'button';
+    btn.textContent = '▶';
+    btn.title = '송신된 TTS 음성 재생';
+
+    const audio = new Audio(audioUrl);
+    audio.addEventListener('ended', () => { btn.classList.remove('playing'); btn.textContent = '▶'; });
+    btn.addEventListener('click', () => {
+      if (!audio.paused) {
+        audio.pause(); audio.currentTime = 0;
+        btn.classList.remove('playing'); btn.textContent = '▶';
+        return;
+      }
+      btn.classList.add('playing'); btn.textContent = '■';
+      audio.play().catch((e) => {
+        log('Play error', e.message);
+        btn.classList.remove('playing'); btn.textContent = '▶';
+      });
+    });
+
+    const txt = document.createElement('span');
+    txt.className = 'text';
+    txt.textContent = text;
+
+    row.appendChild(btn);
+    row.appendChild(txt);
+    els.chat.appendChild(row);
+    els.chat.scrollTop = els.chat.scrollHeight;
   };
 
   // ── AudioContext / TTS-as-mic 파이프라인 ──────────────────────────
@@ -59,8 +98,14 @@
       const err = await res.text().catch(() => '');
       throw new Error(`TTS ${res.status}: ${err}`);
     }
-    const arrayBuffer = await res.arrayBuffer();
-    const buffer = await audioCtx.decodeAudioData(arrayBuffer);
+    const bytes = await res.arrayBuffer();
+    // decodeAudioData 가 ArrayBuffer 를 detach 시킬 수 있으므로,
+    // blob 용 사본을 먼저 떠둔다.
+    const blob = new Blob([bytes.slice(0)], { type: 'audio/wav' });
+    const audioUrl = URL.createObjectURL(blob);
+    addUserBubble(text, audioUrl);
+
+    const buffer = await audioCtx.decodeAudioData(bytes);
     const src = audioCtx.createBufferSource();
     src.buffer = buffer;
     src.connect(micDest);
