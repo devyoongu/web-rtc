@@ -152,6 +152,13 @@
       // 서버가 8kHz WAV 를 내려주므로 decodeAudioData 도 리샘플링 없이 통과.
       audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 8000 });
       micDest = audioCtx.createMediaStreamDestination();
+      // 인코더 keep-warm: 0 신호를 항상 흘려 RTP 송출이 50pps 로 유지되게 함.
+      // (Send 사이 무신호 구간에 WebRTC 인코더가 throttle/idle 되어 callbot 측에
+      //  RTP 가 ~60ms 간격으로 도착하던 것을 일정 cadence 로 보정.)
+      const silence = audioCtx.createConstantSource();
+      silence.offset.value = 0;
+      silence.connect(micDest);
+      silence.start();
     }
     if (audioCtx.state === 'suspended') {
       // 브라우저 자동재생 정책: 사용자 클릭 이후 resume.
