@@ -89,6 +89,8 @@
     const grp = document.createElement('div');
     grp.className = 'response-group';
     wrap._responseGroup = grp;
+    // STT 도착까지 걸린 시간을 annotation 에 표시하기 위해 송신 시각 기록.
+    wrap._sentAt = Date.now();
     els.chat.appendChild(wrap);
     els.chat.appendChild(grp);
     els.chat.scrollTop = els.chat.scrollHeight;
@@ -121,7 +123,11 @@
     _activeWrap = wrap;
     const annot = document.createElement('div');
     annot.className = 'stt-annot';
-    annot.textContent = `🎙 ${transcript}`;
+    // latency: 사용자 송신 (wrap 생성) 시점 → STT 결과 도착 시점.
+    // retry 가 발생하면 그만큼 길어지므로, retry 영향을 사용자가 시각적으로 인지 가능.
+    const latencyMs = wrap._sentAt ? Date.now() - wrap._sentAt : null;
+    const latencyTag = latencyMs != null ? ` (${(latencyMs / 1000).toFixed(1)}s)` : '';
+    annot.textContent = `🎙${latencyTag} ${transcript}`;
     wrap.appendChild(annot);
     els.chat.scrollTop = els.chat.scrollHeight;
   };
