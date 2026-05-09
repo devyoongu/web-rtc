@@ -93,12 +93,19 @@
         if (!e.data) return;
         let data;
         try { data = JSON.parse(e.data); } catch { return; }
-        if (!data.text) return;
-        const key = data.text + '|' + (data.url || '');
+        // (1) Listening 윈도우 시작 — 자동 송신 스케줄러가 이 시점을 신호로 사용.
+        if (data.type === 'listening') {
+          window.dispatchEvent(new CustomEvent('callbot:listening'));
+          return;
+        }
+        // (2) 봇 응답 텍스트
+        const text = data.text;
+        if (!text) return;
+        const key = text + '|' + (data.url || '');
         if (key === _lastBotKey) return;
         _lastBotKey = key;
         const url = data.url ? cfg.recvBase + data.url : null;
-        addBotBubble(data.text, url);
+        addBotBubble(text, url);
       };
       es.onerror = () => log('Events stream error (will auto-retry)');
     } catch (e) {

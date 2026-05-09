@@ -50,6 +50,8 @@ LOG_PATH = Path(os.environ.get("CALLBOT_LOG_PATH", "/tmp/callbot.log"))
 
 # callbot 의 'TTS enqueue:' 로그 라인 파싱.
 TTS_ENQUEUE_RE = re.compile(r"TTS enqueue: '(.+?)'")
+# callbot 의 'Turn N: Listening...' (STT window 시작) 라인 파싱.
+LISTENING_RE = re.compile(r"Turn \d+: Listening\.\.\.")
 
 app = FastAPI(title="web-rtc TTS proxy")
 
@@ -132,10 +134,13 @@ def _prefetch_recv_wav(text: str) -> Path | None:
 @app.get("/events")
 async def events():
     """
-    callbot 로그를 tail 하여 'TTS enqueue: <text>' 이벤트를 SSE 로 push.
+    callbot 로그를 tail 하여 SSE 로 두 종류 이벤트를 push.
 
-    각 이벤트:
-      data: {"text": "...", "url": "/wav/recv/<file>.wav"}
+    1) 봇 응답 텍스트 (TTS enqueue 라인):
+       data: {"type": "bot_text", "text": "...", "url": "/wav/recv/<file>.wav"}
+    2) STT Listening 윈도우 시작 (Turn N: Listening 라인):
+       data: {"type": "listening"}
+       — 브라우저는 이 시점에 발신해야 audio 가 STT window 안에 도달.
     """
     if not LOG_PATH.exists():
         raise HTTPException(status_code=404, detail=f"log not found: {LOG_PATH}")
@@ -151,13 +156,18 @@ async def events():
                 if not line:
                     await asyncio.sleep(0.5)
                     continue
+                # Listening 윈도우 시작 (가장 빈도 높음, 먼저 매칭)
+                if LISTENING_RE.search(line):
+                    yield f"data: {json.dumps({'type': 'listening'})}\n\n"
+                    continue
+                # 봇 응답 텍스트
                 m = TTS_ENQUEUE_RE.search(line)
                 if not m:
                     continue
                 text = m.group(1)
                 # GCP 호출이 동기라 event loop 블로킹 방지
                 saved = await asyncio.to_thread(_prefetch_recv_wav, text)
-                payload = {"text": text}
+                payload = {"type": "bot_text", "text": text}
                 if saved is not None:
                     payload["url"] = f"/wav/recv/{saved.name}"
                 yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
