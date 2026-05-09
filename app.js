@@ -195,7 +195,12 @@
     }
   };
 
-  const speakText = async (text) => {
+  // user 가 Send 누른 즉시 background 에서 fetch + decodeAudioData 를 끝낸다.
+  // 결과 (audioUrl, AudioBuffer) 를 _sendQueue 항목에 prefetchPromise 로 첨부.
+  // listening event 도달 시 drainOne 은 prefetchPromise 만 await 하면 되므로
+  // (이미 resolved 일 가능성 높음) 즉시 src.start() 가능 → fetch 지연이 listening
+  // window 와 분리됨 → callbot 의 1st STT timeout 발생률 대폭 감소.
+  const prefetchTTS = async (text) => {
     await ensureAudioPipeline();
     const res = await fetch(cfg.ttsBackend, {
       method: 'POST',
@@ -211,9 +216,13 @@
     // blob 용 사본을 먼저 떠둔다.
     const blob = new Blob([bytes.slice(0)], { type: 'audio/wav' });
     const audioUrl = URL.createObjectURL(blob);
-    addUserBubble(text, audioUrl);
-
     const buffer = await audioCtx.decodeAudioData(bytes);
+    return { text, audioUrl, buffer };
+  };
+
+  const playPrefetched = async ({ text, audioUrl, buffer }) => {
+    await ensureAudioPipeline();
+    addUserBubble(text, audioUrl);
     const src = audioCtx.createBufferSource();
     src.buffer = buffer;
     src.connect(micDest);
@@ -317,19 +326,23 @@
   // 가 끼어들어 응답이 ~10초 지연되고, retry 로 인한 추가 STT 이벤트가
   // FIFO 큐 매칭을 어긋나게 한다. listening 이벤트가 도착할 때만 한 개씩
   // 송신해 audio 가 항상 1st window 안에 도달하도록 한다.
+  // 큐 항목 = { text, prefetchPromise }. prefetchPromise 는 send() 시 즉시
+  // 시작되어 background 에서 TTS fetch + decode 를 끝내 둔다.
   const _sendQueue = [];
   let _autoSendArmed = false;
   let _draining = false;
 
   const drainOne = async () => {
     if (_draining) return;
-    const text = _sendQueue.shift();
-    if (!text) return;
+    const item = _sendQueue.shift();
+    if (!item) return;
     _draining = true;
     try {
-      await speakText(text);
+      const data = await item.prefetchPromise;
+      if (!data) return;  // prefetch 실패
+      await playPrefetched(data);
     } catch (e) {
-      log('Auto-send TTS error', e.message);
+      log('Auto-send error', e.message);
     } finally {
       _draining = false;
     }
@@ -349,7 +362,13 @@
     const text = els.textInput.value.trim();
     if (!text) return;
     els.textInput.value = '';
-    _sendQueue.push(text);
+    // 즉시 background prefetch 시작 — listening event 가 도달하기 전에
+    // TTS fetch + decode 가 완료되어 있으면 drainOne 은 즉시 src.start().
+    const prefetchPromise = prefetchTTS(text).catch((e) => {
+      log('Prefetch error', e.message);
+      return null;
+    });
+    _sendQueue.push({ text, prefetchPromise });
     if (_autoSendArmed) {
       _autoSendArmed = false;
       drainOne();
