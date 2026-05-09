@@ -235,6 +235,28 @@
     return { text, audioUrl, buffer };
   };
 
+  // 같은 text 를 다시 보낼 때 fetch/decode 를 반복하지 않는다.
+  // AudioBuffer 는 createBufferSource 로 매번 새 source 를 만들면 재사용 가능,
+  // blob URL 도 revoke 하지 않으면 여러 번 재생 가능. 따라서 prefetchTTS 결과를
+  // 그대로 캐싱해 두 번째 송신부터는 즉시 src.start() 까지 갈 수 있다.
+  const _ttsCache = new Map();  // text → Promise<{text, audioUrl, buffer}>
+
+  const getOrPrefetchTTS = (text) => {
+    const cached = _ttsCache.get(text);
+    if (cached) {
+      log(`TTS cache hit: ${text.slice(0, 30)}${text.length > 30 ? '…' : ''}`);
+      return cached;
+    }
+    const promise = prefetchTTS(text).catch((e) => {
+      log('Prefetch error', e.message);
+      // 실패한 promise 가 캐시에 남으면 다음 호출도 같은 실패를 반환 — 제거.
+      _ttsCache.delete(text);
+      return null;
+    });
+    _ttsCache.set(text, promise);
+    return promise;
+  };
+
   const playPrefetched = async ({ text, audioUrl, buffer }) => {
     await ensureAudioPipeline();
     addUserBubble(text, audioUrl);
@@ -397,12 +419,10 @@
     const text = els.textInput.value.trim();
     if (!text) return;
     els.textInput.value = '';
-    // 즉시 background prefetch 시작 — listening event 가 도달하기 전에
-    // TTS fetch + decode 가 완료되어 있으면 drainOne 은 즉시 src.start().
-    const prefetchPromise = prefetchTTS(text).catch((e) => {
-      log('Prefetch error', e.message);
-      return null;
-    });
+    // getOrPrefetchTTS: 같은 text 면 캐시된 prefetch promise 그대로 사용.
+    // 새 text 면 background 에서 fetch+decode 시작 (listening event 가 도달하기
+    // 전에 끝나면 drainOne 은 즉시 src.start()).
+    const prefetchPromise = getOrPrefetchTTS(text);
     _sendQueue.push({ text, prefetchPromise });
     // listening 이 이미 와 있으면 quiet drain 예약. 아직이면 listening 이벤트
     // 도착 시 자동 예약됨.
