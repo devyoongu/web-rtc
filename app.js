@@ -93,12 +93,16 @@
   };
 
   const attachStt = (transcript, success) => {
+    // success only consume — fail/non_voice/error 는 callbot 의 retry 로 인한
+    // 부가 이벤트이므로 wrap 을 consume 하지 않는다. consume 하면 사용자 메시지와
+    // STT 결과의 FIFO 매칭이 어긋남 (wrap N 이 다음 turn 의 retry STT 와 매칭).
+    const ok = success && transcript && transcript !== 'non_voice' && transcript !== 'error';
+    if (!ok) return;
     const wrap = _pendingUserBubbles.shift();
-    if (!wrap) return;  // 매칭할 사용자 말풍선 없으면 (예: 인사말 turn 의 STT) 무시
+    if (!wrap) return;
     const annot = document.createElement('div');
-    const ok = success && transcript && transcript !== 'non_voice';
-    annot.className = 'stt-annot' + (ok ? '' : ' stt-fail');
-    annot.textContent = ok ? `🎙 ${transcript}` : '🎙 (콜봇이 인식 실패)';
+    annot.className = 'stt-annot';
+    annot.textContent = `🎙 ${transcript}`;
     wrap.appendChild(annot);
     els.chat.scrollTop = els.chat.scrollHeight;
   };
@@ -281,17 +285,43 @@
     }
   });
 
-  const send = async () => {
-    const text = els.textInput.value.trim();
+  // ── Auto-send: callbot listening window 에 정렬 ─────────────────
+  // user audio 가 callbot 의 1st listening window 안에 도달하지 못하면
+  // callbot 이 같은 turn 을 retry — fallback 멘트("잘 들리지 않습니다")
+  // 가 끼어들어 응답이 ~10초 지연되고, retry 로 인한 추가 STT 이벤트가
+  // FIFO 큐 매칭을 어긋나게 한다. listening 이벤트가 도착할 때만 한 개씩
+  // 송신해 audio 가 항상 1st window 안에 도달하도록 한다.
+  const _sendQueue = [];
+  let _autoSendArmed = false;
+  let _draining = false;
+
+  const drainOne = async () => {
+    if (_draining) return;
+    const text = _sendQueue.shift();
     if (!text) return;
-    els.sendBtn.disabled = true;
+    _draining = true;
     try {
       await speakText(text);
-      els.textInput.value = '';
     } catch (e) {
-      log('TTS error', e.message);
+      log('Auto-send TTS error', e.message);
     } finally {
-      els.sendBtn.disabled = !activeSession;
+      _draining = false;
+    }
+  };
+
+  window.addEventListener('callbot:listening', () => {
+    if (_sendQueue.length > 0) drainOne();
+    else _autoSendArmed = true;  // 다음 user 입력이 오면 즉시 송신
+  });
+
+  const send = () => {
+    const text = els.textInput.value.trim();
+    if (!text) return;
+    els.textInput.value = '';
+    _sendQueue.push(text);
+    if (_autoSendArmed) {
+      _autoSendArmed = false;
+      drainOne();
     }
   };
   els.sendBtn.addEventListener('click', send);
