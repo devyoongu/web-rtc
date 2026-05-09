@@ -77,29 +77,48 @@
     return row;
   };
 
+  // 각 user wrap 바로 다음에 response-group 을 배치해 그 wrap 에 대한
+  // 봇 답변을 모은다. RTP 타이밍/retry 가 어긋나서 callbot 응답이 새 user
+  // wrap 추가 후에 도착하더라도, _activeWrap 를 통해 올바른 group 으로 라우팅.
+  let _activeWrap = null;
+
   const addUserBubble = (text, audioUrl) => {
     const wrap = document.createElement('div');
     wrap.className = 'bubble-wrap user';
     wrap.appendChild(_makeBubbleRow('user', text, audioUrl));
+    const grp = document.createElement('div');
+    grp.className = 'response-group';
+    wrap._responseGroup = grp;
     els.chat.appendChild(wrap);
+    els.chat.appendChild(grp);
     els.chat.scrollTop = els.chat.scrollHeight;
     _pendingUserBubbles.push(wrap);
   };
 
   const addBotBubble = (text, audioUrl) => {
     const row = _makeBubbleRow('bot', text, audioUrl);
-    els.chat.appendChild(row);
+    if (_activeWrap && _activeWrap._responseGroup) {
+      _activeWrap._responseGroup.appendChild(row);
+    } else {
+      // 통화 시작 직후 인사말 등 — 아직 user wrap 이 없으므로 chat top-level.
+      els.chat.appendChild(row);
+    }
     els.chat.scrollTop = els.chat.scrollHeight;
   };
 
   const attachStt = (transcript, success) => {
     // success only consume — fail/non_voice/error 는 callbot 의 retry 로 인한
-    // 부가 이벤트이므로 wrap 을 consume 하지 않는다. consume 하면 사용자 메시지와
-    // STT 결과의 FIFO 매칭이 어긋남 (wrap N 이 다음 turn 의 retry STT 와 매칭).
+    // 부가 이벤트이므로 wrap 을 consume 하지 않는다 (FIFO 매칭 보존).
+    // 다만 fail 시에도 _activeWrap 은 가장 오래된 pending wrap 으로 갱신해
+    // 후속 fallback 봇 멘트("잘 들리지 않습니다")가 올바른 group 으로 가도록.
     const ok = success && transcript && transcript !== 'non_voice' && transcript !== 'error';
-    if (!ok) return;
+    if (!ok) {
+      if (_pendingUserBubbles[0]) _activeWrap = _pendingUserBubbles[0];
+      return;
+    }
     const wrap = _pendingUserBubbles.shift();
     if (!wrap) return;
+    _activeWrap = wrap;
     const annot = document.createElement('div');
     annot.className = 'stt-annot';
     annot.textContent = `🎙 ${transcript}`;
@@ -259,6 +278,7 @@
       setState('in-call', `with ${cfg.callExtension}`);
       els.textInput.disabled = false;
       els.sendBtn.disabled = false;
+      _activeWrap = null;
     });
     activeSession.on('confirmed', () => log('confirmed'));
     activeSession.on('ended', (e) => {
@@ -309,9 +329,14 @@
     }
   };
 
+  // 매 listening 이벤트마다 큐에서 한 개 송신. callbot 이 같은 turn 을 retry
+  // 해서 listening 이 한 번 더 발화되어도 그냥 drain. 결과적으로 사용자 메시지
+  // N 개에 대해 N+a 번의 listening 이 발화될 수 있음 (a = retry 횟수). 이 경우
+  // 큐가 먼저 고갈되고 잔여 listening 들은 무동작 (audio_source 가 silence 만
+  // 읽다가 timeout). FIFO 매칭은 attachStt 의 success-only consume 으로 보존.
   window.addEventListener('callbot:listening', () => {
     if (_sendQueue.length > 0) drainOne();
-    else _autoSendArmed = true;  // 다음 user 입력이 오면 즉시 송신
+    else _autoSendArmed = true;
   });
 
   const send = () => {

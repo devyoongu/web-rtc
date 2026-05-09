@@ -84,6 +84,14 @@ audio { width: 100%; margin-top: 12px; }
   max-width: 80%;
 }
 .bubble.bot  { align-self: flex-start; }
+/* user wrap 직후의 response-group — 그 wrap 의 봇 응답들을 묶어 시각적으로
+   연관시킨다. 빈 group 은 공간을 차지하지 않도록 :empty 처리. */
+.response-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.response-group:empty { display: none; }
 /* user 말풍선은 wrap 이 정렬을 담당하므로 align-self 불필요. max-width 도 wrap 이 제한 */
 .bubble-wrap.user .bubble.user { max-width: 100%; }
 
