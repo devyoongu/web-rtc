@@ -89,8 +89,6 @@
     const grp = document.createElement('div');
     grp.className = 'response-group';
     wrap._responseGroup = grp;
-    // STT 도착까지 걸린 시간을 annotation 에 표시하기 위해 송신 시각 기록.
-    wrap._sentAt = Date.now();
     els.chat.appendChild(wrap);
     els.chat.appendChild(grp);
     els.chat.scrollTop = els.chat.scrollHeight;
@@ -123,7 +121,7 @@
     }
   };
 
-  const attachStt = (transcript, success) => {
+  const attachStt = (transcript, success, eosToFinalMs) => {
     // success only consume — fail/non_voice/error 는 callbot 의 retry 로 인한
     // 부가 이벤트이므로 wrap 을 consume 하지 않는다 (FIFO 매칭 보존).
     // 다만 fail 시에도 _activeWrap 은 가장 오래된 pending wrap 으로 갱신해
@@ -138,10 +136,12 @@
     _activeWrap = wrap;
     const annot = document.createElement('div');
     annot.className = 'stt-annot';
-    // latency: 사용자 송신 (wrap 생성) 시점 → STT 결과 도착 시점.
-    // retry 가 발생하면 그만큼 길어지므로, retry 영향을 사용자가 시각적으로 인지 가능.
-    const latencyMs = wrap._sentAt ? Date.now() - wrap._sentAt : null;
-    const latencyTag = latencyMs != null ? ` (${(latencyMs / 1000).toFixed(1)}s)` : '';
+    // latency: callbot 의 EOS→Final 측정값 (server VAD 의 SPEECH_END 또는 client
+    // VAD flush 완료 → Google STT is_final 도착). Google STT 응답 시간 자체를
+    // 직접 보여줌. SSE 에 eos_to_final_ms 가 없는 경우 (구버전 호환) 만 latency 미표시.
+    const latencyTag = (typeof eosToFinalMs === 'number')
+      ? ` (${eosToFinalMs}ms)`
+      : '';
     annot.textContent = `🎙${latencyTag} ${transcript}`;
     wrap.appendChild(annot);
     els.chat.scrollTop = els.chat.scrollHeight;
@@ -165,7 +165,7 @@
         }
         // (2) STT 인식 결과 — 가장 최근 사용자 말풍선 하위에 annotation
         if (data.type === 'stt') {
-          attachStt(data.transcript, data.success);
+          attachStt(data.transcript, data.success, data.eos_to_final_ms);
           return;
         }
         // (3) 봇 응답 텍스트
