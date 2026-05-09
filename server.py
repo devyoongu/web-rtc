@@ -54,6 +54,10 @@ TTS_ENQUEUE_RE = re.compile(r"TTS enqueue: '(.+?)'")
 # 같은 라인에 옵션으로 붙는 extras (예: stt_to_bot=234ms, kind=meta_first).
 TTS_EXTRAS_STT_RE  = re.compile(r"stt_to_bot=(\d+)ms")
 TTS_EXTRAS_KIND_RE = re.compile(r"kind=(\w+)")
+# 'TTS synth done: ...' 로그 라인 — 한 sentence 의 GCP 합성 완료 시각.
+TTS_SYNTH_DONE_RE = re.compile(
+    r"TTS synth done: '(.+?)' \(synth=(\d+)ms(?:, kind=(\w+))?\)"
+)
 # callbot 의 'Turn N: Listening...' (STT window 시작) 라인 파싱.
 LISTENING_RE = re.compile(r"Turn \d+: Listening\.\.\.")
 # callbot 의 'STT result: success=..., transcript=...' 라인 파싱.
@@ -169,6 +173,18 @@ async def events():
                 # Listening 윈도우 시작 (가장 빈도 높음, 먼저 매칭)
                 if LISTENING_RE.search(line):
                     yield f"data: {json.dumps({'type': 'listening'})}\n\n"
+                    continue
+                # TTS 합성 완료 — 'TTS enqueue:' 보다 먼저 매칭 (둘 다 'TTS' 포함)
+                m_synth = TTS_SYNTH_DONE_RE.search(line)
+                if m_synth:
+                    payload = {
+                        "type": "tts_synth",
+                        "text": m_synth.group(1),
+                        "synth_ms": int(m_synth.group(2)),
+                    }
+                    if m_synth.group(3):
+                        payload["kind"] = m_synth.group(3)
+                    yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
                     continue
                 # STT 인식 결과 (사용자 말풍선 하위 annotation 용)
                 m_stt = STT_RESULT_RE.search(line)
