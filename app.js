@@ -31,8 +31,13 @@
 
   // ── 채팅 말풍선 ─────────────────────────────────────────────────
   // user(우측): 사용자가 보낸 텍스트 + ▶ 버튼 (송신된 WAV 재생)
+  //            전송 직후 wrap 을 _pendingUserBubbles 큐에 push.
+  //            서버에서 STT 결과 이벤트가 오면 큐의 가장 오래된 wrap 에
+  //            "🎙 <transcript>" annotation 을 하위에 붙임 (FIFO).
   // bot(좌측): 콜봇 응답 텍스트(/events SSE) + ▶ 버튼 (응답 WAV 재생)
-  const addBubble = (kind, text, audioUrl) => {
+  const _pendingUserBubbles = [];
+
+  const _makeBubbleRow = (kind, text, audioUrl) => {
     const row = document.createElement('div');
     row.className = `bubble ${kind}`;
 
@@ -67,20 +72,36 @@
     txt.className = 'text';
     txt.textContent = text;
 
-    // user: [▶] [text]   bot: [text] [▶]
-    if (kind === 'user') {
-      row.appendChild(btn);
-      row.appendChild(txt);
-    } else {
-      row.appendChild(txt);
-      row.appendChild(btn);
-    }
+    if (kind === 'user') { row.appendChild(btn); row.appendChild(txt); }
+    else                 { row.appendChild(txt); row.appendChild(btn); }
+    return row;
+  };
+
+  const addUserBubble = (text, audioUrl) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'bubble-wrap user';
+    wrap.appendChild(_makeBubbleRow('user', text, audioUrl));
+    els.chat.appendChild(wrap);
+    els.chat.scrollTop = els.chat.scrollHeight;
+    _pendingUserBubbles.push(wrap);
+  };
+
+  const addBotBubble = (text, audioUrl) => {
+    const row = _makeBubbleRow('bot', text, audioUrl);
     els.chat.appendChild(row);
     els.chat.scrollTop = els.chat.scrollHeight;
   };
 
-  const addUserBubble = (text, audioUrl) => addBubble('user', text, audioUrl);
-  const addBotBubble = (text, audioUrl) => addBubble('bot', text, audioUrl);
+  const attachStt = (transcript, success) => {
+    const wrap = _pendingUserBubbles.shift();
+    if (!wrap) return;  // 매칭할 사용자 말풍선 없으면 (예: 인사말 turn 의 STT) 무시
+    const annot = document.createElement('div');
+    const ok = success && transcript && transcript !== 'non_voice';
+    annot.className = 'stt-annot' + (ok ? '' : ' stt-fail');
+    annot.textContent = ok ? `🎙 ${transcript}` : '🎙 (콜봇이 인식 실패)';
+    wrap.appendChild(annot);
+    els.chat.scrollTop = els.chat.scrollHeight;
+  };
 
   // ── 콜봇 응답 SSE 구독 ─────────────────────────────────────────
   // 서버(/events) 가 callbot 로그의 'TTS enqueue:' 라인을 push.
@@ -98,7 +119,12 @@
           window.dispatchEvent(new CustomEvent('callbot:listening'));
           return;
         }
-        // (2) 봇 응답 텍스트
+        // (2) STT 인식 결과 — 가장 최근 사용자 말풍선 하위에 annotation
+        if (data.type === 'stt') {
+          attachStt(data.transcript, data.success);
+          return;
+        }
+        // (3) 봇 응답 텍스트
         const text = data.text;
         if (!text) return;
         const key = text + '|' + (data.url || '');

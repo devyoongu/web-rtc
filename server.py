@@ -52,6 +52,8 @@ LOG_PATH = Path(os.environ.get("CALLBOT_LOG_PATH", "/tmp/callbot.log"))
 TTS_ENQUEUE_RE = re.compile(r"TTS enqueue: '(.+?)'")
 # callbot 의 'Turn N: Listening...' (STT window 시작) 라인 파싱.
 LISTENING_RE = re.compile(r"Turn \d+: Listening\.\.\.")
+# callbot 의 'STT result: success=..., transcript=...' 라인 파싱.
+STT_RESULT_RE = re.compile(r"STT result: success=(True|False), transcript='(.+?)'")
 
 app = FastAPI(title="web-rtc TTS proxy")
 
@@ -159,6 +161,14 @@ async def events():
                 # Listening 윈도우 시작 (가장 빈도 높음, 먼저 매칭)
                 if LISTENING_RE.search(line):
                     yield f"data: {json.dumps({'type': 'listening'})}\n\n"
+                    continue
+                # STT 인식 결과 (사용자 말풍선 하위 annotation 용)
+                m_stt = STT_RESULT_RE.search(line)
+                if m_stt:
+                    success = m_stt.group(1) == "True"
+                    transcript = m_stt.group(2)
+                    payload = {"type": "stt", "transcript": transcript, "success": success}
+                    yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
                     continue
                 # 봇 응답 텍스트
                 m = TTS_ENQUEUE_RE.search(line)

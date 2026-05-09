@@ -68,14 +68,39 @@ audio { width: 100%; margin-top: 12px; }
   font-size: 13px;
   margin: auto;
 }
+/* 사용자 말풍선 + STT annotation 을 묶는 컬럼 컨테이너 */
+.bubble-wrap.user {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;  /* 안쪽 요소들 우측 정렬 */
+  gap: 4px;
+  max-width: 80%;
+  align-self: flex-end;
+}
 .bubble {
   display: flex;
   align-items: center;
   gap: 8px;
   max-width: 80%;
 }
-.bubble.user { align-self: flex-end; }
 .bubble.bot  { align-self: flex-start; }
+/* user 말풍선은 wrap 이 정렬을 담당하므로 align-self 불필요. max-width 도 wrap 이 제한 */
+.bubble-wrap.user .bubble.user { max-width: 100%; }
+
+/* STT 인식 결과 annotation: 사용자 말풍선 바로 아래에 작은 italic 텍스트 */
+.stt-annot {
+  font-size: 11px;
+  color: #6b7280;
+  font-style: italic;
+  line-height: 1.3;
+  word-break: break-word;
+  text-align: right;
+  padding: 0 2px;
+}
+.stt-annot.stt-fail {
+  color: #b03a3a;
+  opacity: 0.85;
+}
 .bubble .text {
   padding: 8px 14px;
   font-size: 14px;
