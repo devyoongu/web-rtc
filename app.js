@@ -97,7 +97,17 @@
     _pendingUserBubbles.push(wrap);
   };
 
+  // 봇 응답 quiet period 추적 — 봇 chunk 가 multi-part 로 도착하므로,
+  // 마지막 봇 bubble 후 N초 동안 신규 chunk 없으면 "응답 끝났다" 로 간주.
+  let _lastBotBubbleAt = 0;
+
   const addBotBubble = (text, audioUrl) => {
+    _lastBotBubbleAt = Date.now();
+    // 봇이 새 chunk 를 보냈으므로 예약된 송신 timer 가 있다면 reset (재시작).
+    if (_pendingDrainTimer) {
+      clearTimeout(_pendingDrainTimer);
+      _pendingDrainTimer = null;
+    }
     const row = _makeBubbleRow('bot', text, audioUrl);
     if (_activeWrap && _activeWrap._responseGroup) {
       _activeWrap._responseGroup.appendChild(row);
@@ -106,6 +116,11 @@
       els.chat.appendChild(row);
     }
     els.chat.scrollTop = els.chat.scrollHeight;
+    // listening 이 미리 와서 armed 상태에서 봇 응답이 다시 온 경우, quiet
+    // period 후 재시도하도록 timer 재예약.
+    if (_listeningArmed && _sendQueue.length > 0) {
+      _scheduleQuietDrain();
+    }
   };
 
   const attachStt = (transcript, success) => {
@@ -294,6 +309,9 @@
       els.textInput.disabled = false;
       els.sendBtn.disabled = false;
       _activeWrap = null;
+      _lastBotBubbleAt = 0;
+      _listeningArmed = false;
+      if (_pendingDrainTimer) { clearTimeout(_pendingDrainTimer); _pendingDrainTimer = null; }
     });
     activeSession.on('confirmed', () => log('confirmed'));
     activeSession.on('ended', (e) => {
@@ -329,8 +347,15 @@
   // 큐 항목 = { text, prefetchPromise }. prefetchPromise 는 send() 시 즉시
   // 시작되어 background 에서 TTS fetch + decode 를 끝내 둔다.
   const _sendQueue = [];
-  let _autoSendArmed = false;
   let _draining = false;
+  // listening 이벤트가 도착했지만 봇 응답이 아직 끝나지 않았을 수 있어 quiet
+  // period (BOT_QUIET_MS) 만큼 마지막 봇 bubble 후 대기하고 drain. 봇 chunk
+  // 가 multi-part 라 listening 직후 바로 송신하면 봇 후속 chunk 와 user audio
+  // 가 SIP 채널에서 충돌하거나, callbot 측 RTP 큐의 누적 silence 가 다 빠지기
+  // 전에 user audio 가 묻혀 STT 의 1st window 가 fail 하는 패턴 발생.
+  let _listeningArmed = false;
+  let _pendingDrainTimer = null;
+  const BOT_QUIET_MS = 3000;
 
   const drainOne = async () => {
     if (_draining) return;
@@ -348,14 +373,24 @@
     }
   };
 
-  // 매 listening 이벤트마다 큐에서 한 개 송신. callbot 이 같은 turn 을 retry
-  // 해서 listening 이 한 번 더 발화되어도 그냥 drain. 결과적으로 사용자 메시지
-  // N 개에 대해 N+a 번의 listening 이 발화될 수 있음 (a = retry 횟수). 이 경우
-  // 큐가 먼저 고갈되고 잔여 listening 들은 무동작 (audio_source 가 silence 만
-  // 읽다가 timeout). FIFO 매칭은 attachStt 의 success-only consume 으로 보존.
+  const _scheduleQuietDrain = () => {
+    if (_pendingDrainTimer) clearTimeout(_pendingDrainTimer);
+    if (_sendQueue.length === 0) return;
+    const elapsedSinceBot = _lastBotBubbleAt ? Date.now() - _lastBotBubbleAt : BOT_QUIET_MS;
+    const waitMs = Math.max(0, BOT_QUIET_MS - elapsedSinceBot);
+    _pendingDrainTimer = setTimeout(() => {
+      _pendingDrainTimer = null;
+      _listeningArmed = false;
+      if (_sendQueue.length > 0 && !_draining) drainOne();
+    }, waitMs);
+  };
+
+  // listening 이벤트가 오면 즉시 drain 하지 않고, 마지막 봇 응답으로부터 3초
+  // 의 quiet period 가 보장될 때 drain. 그 사이에 봇이 새 chunk 를 보내면
+  // addBotBubble 이 timer 를 reset.
   window.addEventListener('callbot:listening', () => {
-    if (_sendQueue.length > 0) drainOne();
-    else _autoSendArmed = true;
+    _listeningArmed = true;
+    if (_sendQueue.length > 0) _scheduleQuietDrain();
   });
 
   const send = () => {
@@ -369,10 +404,9 @@
       return null;
     });
     _sendQueue.push({ text, prefetchPromise });
-    if (_autoSendArmed) {
-      _autoSendArmed = false;
-      drainOne();
-    }
+    // listening 이 이미 와 있으면 quiet drain 예약. 아직이면 listening 이벤트
+    // 도착 시 자동 예약됨.
+    if (_listeningArmed) _scheduleQuietDrain();
   };
   els.sendBtn.addEventListener('click', send);
   els.textInput.addEventListener('keydown', (e) => {
