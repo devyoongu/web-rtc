@@ -99,21 +99,21 @@
   // 마지막 봇 bubble 후 N초 동안 신규 chunk 없으면 "응답 끝났다" 로 간주.
   let _lastBotBubbleAt = 0;
 
-  // tts_synth 이벤트는 bot_text 이벤트 뒤에 한 번 더 도착하므로, 매 봇 bubble 을
+  // tts_synth 이벤트는 bot_text 이벤트 뒤에 한 번 더 도착하므로, 매 봇 bubble row 를
   // text 별 큐에 등록해 두고 synth_done 도착 시 FIFO 로 매칭 후 annotation 부착.
   // (max_workers=2 의 합성 완료 순서가 enqueue 순서와 어긋날 수 있지만, 같은 텍스트
   //  가 한 응답 내 중복 등장하는 케이스가 드물어 텍스트 기준 매칭으로 충분.)
-  const _pendingSynthBubbles = new Map();  // text → [container, …]
+  const _pendingSynthBubbles = new Map();  // text → [row, …]
 
-  const _registerSynthPending = (text, container) => {
+  const _registerSynthPending = (text, row) => {
     if (!_pendingSynthBubbles.has(text)) _pendingSynthBubbles.set(text, []);
-    _pendingSynthBubbles.get(text).push(container);
+    _pendingSynthBubbles.get(text).push(row);
   };
 
   const attachSynthLatency = (text, synthMs) => {
     const arr = _pendingSynthBubbles.get(text);
     if (!arr || !arr.length) return;
-    const container = arr.shift();
+    const row = arr.shift();
     if (!arr.length) _pendingSynthBubbles.delete(text);
     const annot = document.createElement('div');
     annot.className = 'bot-latency-annot synth';
@@ -121,7 +121,14 @@
       ? `${(synthMs / 1000).toFixed(2)}s`
       : `${synthMs}ms`;
     annot.textContent = `⚙ TTS합성 ${synthTxt}`;
-    container.appendChild(annot);
+    // 해당 row 바로 아래(같은 문장에 속한 기존 annotation 다음)에 삽입.
+    // row 직후에 이미 STT→bot latency 등 .bot-latency-annot 가 있으면 그 뒤로.
+    let after = row;
+    while (after.nextElementSibling &&
+           after.nextElementSibling.classList.contains('bot-latency-annot')) {
+      after = after.nextElementSibling;
+    }
+    after.insertAdjacentElement('afterend', annot);
     els.chat.scrollTop = els.chat.scrollHeight;
   };
 
@@ -150,8 +157,9 @@
       annot.textContent = `⏱ STT→${label} ${latencyTxt}`;
       container.appendChild(annot);
     }
-    // 모든 bot bubble 은 synth latency 가 따로 도착하므로 큐에 등록.
-    _registerSynthPending(text, container);
+    // 모든 bot bubble 은 synth latency 가 따로 도착하므로 row 를 큐에 등록 →
+    // synth_done 시 row 직후에 annotation 삽입.
+    _registerSynthPending(text, row);
     els.chat.scrollTop = els.chat.scrollHeight;
     // listening 이 미리 와서 armed 상태에서 봇 응답이 다시 온 경우, quiet
     // period 후 재시도하도록 timer 재예약.
