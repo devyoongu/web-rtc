@@ -109,6 +109,15 @@ audio { width: 100%; margin-top: 12px; }
   color: #b03a3a;
   opacity: 0.85;
 }
+/* 봇 응답 latency annotation: 첫 안내멘트/첫 본답변 bubble 바로 아래에 작게. */
+.bot-latency-annot {
+  font-size: 11px;
+  color: #6b7280;
+  font-style: italic;
+  line-height: 1.3;
+  text-align: left;
+  padding: 0 2px 0 8px;
+}
 .bubble .text {
   padding: 8px 14px;
   font-size: 14px;

@@ -99,7 +99,7 @@
   // 마지막 봇 bubble 후 N초 동안 신규 chunk 없으면 "응답 끝났다" 로 간주.
   let _lastBotBubbleAt = 0;
 
-  const addBotBubble = (text, audioUrl) => {
+  const addBotBubble = (text, audioUrl, sttToBotMs, kind) => {
     _lastBotBubbleAt = Date.now();
     // 봇이 새 chunk 를 보냈으므로 예약된 송신 timer 가 있다면 reset (재시작).
     if (_pendingDrainTimer) {
@@ -107,11 +107,22 @@
       _pendingDrainTimer = null;
     }
     const row = _makeBubbleRow('bot', text, audioUrl);
-    if (_activeWrap && _activeWrap._responseGroup) {
-      _activeWrap._responseGroup.appendChild(row);
-    } else {
-      // 통화 시작 직후 인사말 등 — 아직 user wrap 이 없으므로 chat top-level.
-      els.chat.appendChild(row);
+    const container = (_activeWrap && _activeWrap._responseGroup)
+      ? _activeWrap._responseGroup
+      : els.chat;  // 통화 시작 직후 인사말 등 — 아직 user wrap 이 없을 때.
+    container.appendChild(row);
+    // 첫 안내멘트(meta_first) / 첫 본답변(reply_first) 의 STT→bot latency 표시.
+    // callbot 이 turn 별 첫 emit 에만 stt_to_bot_ms 를 첨부 → 이후 chunk 는 미부여.
+    if (typeof sttToBotMs === 'number' &&
+        (kind === 'meta_first' || kind === 'reply_first')) {
+      const annot = document.createElement('div');
+      annot.className = 'bot-latency-annot';
+      const label = kind === 'meta_first' ? '안내멘트' : '본답변';
+      const latencyTxt = sttToBotMs >= 1000
+        ? `${(sttToBotMs / 1000).toFixed(2)}s`
+        : `${sttToBotMs}ms`;
+      annot.textContent = `⏱ STT→${label} ${latencyTxt}`;
+      container.appendChild(annot);
     }
     els.chat.scrollTop = els.chat.scrollHeight;
     // listening 이 미리 와서 armed 상태에서 봇 응답이 다시 온 경우, quiet
@@ -175,7 +186,7 @@
         if (key === _lastBotKey) return;
         _lastBotKey = key;
         const url = data.url ? cfg.recvBase + data.url : null;
-        addBotBubble(text, url);
+        addBotBubble(text, url, data.stt_to_bot_ms, data.kind);
       };
       es.onerror = () => log('Events stream error (will auto-retry)');
     } catch (e) {

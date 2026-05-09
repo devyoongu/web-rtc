@@ -49,7 +49,11 @@ RECV_DIR = _BASE_DIR / "wav" / "recv"
 LOG_PATH = Path(os.environ.get("CALLBOT_LOG_PATH", "/tmp/callbot.log"))
 
 # callbot 의 'TTS enqueue:' 로그 라인 파싱.
+# 본체 텍스트는 그대로 첫 작은따옴표 쌍으로 매칭.
 TTS_ENQUEUE_RE = re.compile(r"TTS enqueue: '(.+?)'")
+# 같은 라인에 옵션으로 붙는 extras (예: stt_to_bot=234ms, kind=meta_first).
+TTS_EXTRAS_STT_RE  = re.compile(r"stt_to_bot=(\d+)ms")
+TTS_EXTRAS_KIND_RE = re.compile(r"kind=(\w+)")
 # callbot 의 'Turn N: Listening...' (STT window 시작) 라인 파싱.
 LISTENING_RE = re.compile(r"Turn \d+: Listening\.\.\.")
 # callbot 의 'STT result: success=..., transcript=...' 라인 파싱.
@@ -186,6 +190,13 @@ async def events():
                 payload = {"type": "bot_text", "text": text}
                 if saved is not None:
                     payload["url"] = f"/wav/recv/{saved.name}"
+                # 같은 라인의 extras (있으면) → SSE payload 에 동봉.
+                m_stt = TTS_EXTRAS_STT_RE.search(line)
+                if m_stt:
+                    payload["stt_to_bot_ms"] = int(m_stt.group(1))
+                m_kind = TTS_EXTRAS_KIND_RE.search(line)
+                if m_kind:
+                    payload["kind"] = m_kind.group(1)
                 yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
         finally:
             f.close()
