@@ -483,8 +483,11 @@
     if (_listeningArmed) _scheduleQuietDrain();
   };
   els.sendBtn.addEventListener('click', send);
+  // 한글/일본어 IME 조합 중 Enter: keydown 의 send() 가 입력값을 clear 한 직후
+  // compositionend 가 마지막 글자를 다시 input 에 넣어 다음 turn 에 의도치 않게
+  // 송신되는 버그가 있었다. isComposing 또는 keyCode 229 (IME) 를 제외.
   els.textInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') send();
+    if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) send();
   });
 
   ua.start();
