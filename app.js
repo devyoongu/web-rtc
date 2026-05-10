@@ -12,6 +12,11 @@
     remoteAudio: document.getElementById('remoteAudio'),
     chat: document.getElementById('chat'),
     log: document.getElementById('log'),
+    // 멀티 질의 (행 기반) — index.html 의 .multi-say section.
+    multiRows:   document.getElementById('multiRows'),
+    addRowBtn:   document.getElementById('addRowBtn'),
+    applyAllBtn: document.getElementById('applyAllBtn'),
+    multiHint:   document.getElementById('multiHint'),
   };
 
   const log = (msg, ...rest) => {
@@ -380,12 +385,24 @@
     log('Register failed', e);
   });
 
+  // 통화 lifecycle 에 따라 input/button enable/disable 일괄 토글.
+  // single-line input/Send + 멀티 질의 행 input/+/적용 모두 한꺼번에.
+  const _setSayDisabled = (disabled) => {
+    els.textInput.disabled = disabled;
+    els.sendBtn.disabled = disabled;
+    if (els.addRowBtn)   els.addRowBtn.disabled   = disabled;
+    if (els.applyAllBtn) els.applyAllBtn.disabled = disabled;
+    if (els.multiRows) {
+      els.multiRows.querySelectorAll('input').forEach(i => i.disabled = disabled);
+      els.multiRows.querySelectorAll('.delete-row-btn').forEach(b => b.disabled = disabled);
+    }
+  };
+
   const onCallEnded = () => {
     activeSession = null;
     els.callBtn.disabled = false;
     els.hangupBtn.disabled = true;
-    els.textInput.disabled = true;
-    els.sendBtn.disabled = true;
+    _setSayDisabled(true);
     setState('registered', `as ${cfg.sipUser}@${cfg.asteriskHost}`);
   };
 
@@ -412,8 +429,7 @@
     activeSession.on('progress', () => log('progress'));
     activeSession.on('accepted', () => {
       setState('in-call', `with ${cfg.callExtension}`);
-      els.textInput.disabled = false;
-      els.sendBtn.disabled = false;
+      _setSayDisabled(false);
       _activeWrap = null;
       _lastBotBubbleAt = 0;
       _botAudioBusyUntil = 0;
@@ -523,6 +539,82 @@
   // 송신되는 버그가 있었다. isComposing 또는 keyCode 229 (IME) 를 제외.
   els.textInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) send();
+  });
+
+  // ── 멀티 질의 (행 기반) ──────────────────────────────────────────
+  // 페이지 로드 시 DEFAULT_QUERIES 5개로 초기 행 채움. 사용자는 + 로 행 추가,
+  // ✕ 로 행 제거, 적용 클릭 시 비어있지 않은 모든 행을 _sendQueue 에 push →
+  // 기존 listening + bot audio busy 정렬로 한 줄씩 순차 송신.
+  const _renumberRows = () => {
+    if (!els.multiRows) return;
+    Array.from(els.multiRows.children).forEach((row, idx) => {
+      const num = row.querySelector('.row-num');
+      if (num) num.textContent = `${idx + 1}.`;
+    });
+  };
+  const _addRow = (value = '', focusIt = false) => {
+    if (!els.multiRows) return null;
+    const row = document.createElement('div');
+    row.className = 'multi-row';
+    const num = document.createElement('span');
+    num.className = 'row-num';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = value;
+    input.placeholder = '질의 입력';
+    input.disabled = els.textInput.disabled;
+    // Enter 키로 같은 행에서 즉시 적용하지 않고 다음 행으로 focus (편집 흐름).
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) {
+        e.preventDefault();
+        const next = row.nextElementSibling?.querySelector('input');
+        if (next) next.focus();
+      }
+    });
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'delete-row-btn';
+    del.textContent = '✕';
+    del.title = '행 삭제';
+    del.disabled = els.textInput.disabled;
+    del.addEventListener('click', () => {
+      row.remove();
+      _renumberRows();
+    });
+    row.appendChild(num);
+    row.appendChild(input);
+    row.appendChild(del);
+    els.multiRows.appendChild(row);
+    _renumberRows();
+    if (focusIt) input.focus();
+    return input;
+  };
+
+  // 초기 행 — DEFAULT_QUERIES (samples.js).
+  if (els.multiRows && Array.isArray(window.DEFAULT_QUERIES)) {
+    window.DEFAULT_QUERIES.forEach(q => _addRow(q));
+  }
+
+  els.addRowBtn?.addEventListener('click', () => {
+    if (els.addRowBtn.disabled) return;
+    _addRow('', true);
+  });
+
+  els.applyAllBtn?.addEventListener('click', () => {
+    if (els.applyAllBtn.disabled || !els.multiRows) return;
+    const inputs = els.multiRows.querySelectorAll('input');
+    const queries = Array.from(inputs).map(i => i.value.trim()).filter(Boolean);
+    if (!queries.length) {
+      if (els.multiHint) els.multiHint.textContent = '비어있지 않은 행이 없습니다';
+      return;
+    }
+    for (const q of queries) {
+      // send() 가 els.textInput 에서 값을 읽고 clear 하므로 줄마다 주입 후 호출.
+      els.textInput.value = q;
+      send();
+    }
+    if (els.multiHint) els.multiHint.textContent = `${queries.length}건 큐잉`;
+    log(`Multi-apply: ${queries.length} queries queued`);
   });
 
   ua.start();

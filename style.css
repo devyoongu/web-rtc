@@ -156,6 +156,105 @@ audio { width: 100%; margin-top: 12px; }
 .bubble.bot .play-btn.playing { background: #555; color: #fff; }
 .bubble .play-btn:disabled { opacity: .35; cursor: not-allowed; }
 
+/* ── 멀티 질의 (행 기반) ─────────────────────────────── */
+.multi-say {
+  margin: 16px 0 4px;
+  padding: 14px 16px 16px;
+  background: #f7f9ff;
+  border: 1px solid #dde3f3;
+  border-radius: 12px;
+}
+.multi-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.multi-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #3a4566;
+  letter-spacing: .01em;
+}
+.multi-hint {
+  font-size: 12px;
+  color: #6b7280;
+}
+.multi-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.multi-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.multi-row .row-num {
+  flex: 0 0 auto;
+  width: 22px;
+  text-align: right;
+  font-size: 11px;
+  color: #94a0b8;
+  font-variant-numeric: tabular-nums;
+}
+.multi-row input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #d2d8e6;
+  border-radius: 8px;
+  font-size: 13px;
+  background: #fff;
+  color: #1c1d22;
+}
+.multi-row input:focus {
+  outline: none;
+  border-color: #2a6df4;
+  box-shadow: 0 0 0 3px rgba(42,109,244,.12);
+}
+.multi-row input:disabled { background: #eef0f5; color: #9aa1ad; }
+.delete-row-btn {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+  color: #94a0b8;
+  font-size: 14px;
+  cursor: pointer;
+}
+.delete-row-btn:hover:not(:disabled) {
+  background: #fcebeb;
+  color: #c0392b;
+  border-color: #f3c4c4;
+}
+.delete-row-btn:disabled { opacity: .35; cursor: not-allowed; }
+.multi-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.multi-actions button {
+  padding: 8px 14px;
+  font-size: 13px;
+}
+button.secondary {
+  background: #fff;
+  color: #2a6df4;
+  border: 1px solid #b3c8f7;
+}
+button.secondary:hover:not(:disabled) {
+  background: #eaf1ff;
+}
+
 /* ── Log (collapsible) ───────────────────────────────── */
 .log-details { margin-top: 16px; }
 .log-details summary {

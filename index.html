@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <title>WebRTC Callbot Client</title>
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css" id="mainStyle" />
+  <script>document.getElementById('mainStyle').href = `style.css?v=${Date.now()}`;</script>
   <script src="https://cdn.jsdelivr.net/npm/jssip@3/dist/jssip.min.js"></script>
 </head>
 <body>
@@ -32,6 +33,18 @@
       <button id="sendBtn" disabled>Send</button>
     </section>
 
+    <section class="multi-say">
+      <div class="multi-header">
+        <h3 class="multi-title">멀티 질의 — 적용 시 봇 답변에 맞춰 순차 송신</h3>
+        <span class="multi-hint" id="multiHint"></span>
+      </div>
+      <div class="multi-rows" id="multiRows"></div>
+      <div class="multi-actions">
+        <button id="addRowBtn" type="button" class="secondary" disabled>+ 행 추가</button>
+        <button id="applyAllBtn" disabled>적용</button>
+      </div>
+    </section>
+
     <audio id="remoteAudio" autoplay playsinline></audio>
 
     <details class="log-details">
@@ -43,6 +56,7 @@
   <script>
     // 개발 중 캐시 무력화. 운영에서는 빌드 hash 로 교체.
     document.write(`<script src="config.js?v=${Date.now()}"><\/script>`);
+    document.write(`<script src="samples.js?v=${Date.now()}"><\/script>`);
     document.write(`<script src="app.js?v=${Date.now()}"><\/script>`);
   </script>
 </body>
