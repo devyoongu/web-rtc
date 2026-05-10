@@ -279,36 +279,35 @@
   };
 
   const attachStt = (transcript, success, eosToFinalMs) => {
-    // success only consume — fail/non_voice/error 는 callbot 의 retry 로 인한
-    // 부가 이벤트이므로 wrap 을 consume 하지 않는다 (FIFO 매칭 보존).
-    // 다만 fail 시에도 _activeWrap 은 가장 오래된 pending wrap 으로 갱신해
-    // 후속 fallback 봇 멘트("잘 들리지 않습니다")가 올바른 group 으로 가도록.
-    const ok = success && transcript && transcript !== 'non_voice' && transcript !== 'error';
-    if (!ok) {
-      if (_pendingUserBubbles[0]) _activeWrap = _pendingUserBubbles[0];
-      return;
-    }
+    // 1 listening = 1 audio send = 1 STT result 1:1 매칭. fail/non_voice/error
+    // 도 wrap 을 consume — callbot 은 fail turn 에 fallback 멘트 송출 후 새
+    // listening 을 emit 하고 브라우저는 그때마다 새 audio 를 큐에서 빼서 send 함.
+    // 큐가 비어 있으면 callbot listening timeout 같은 후행 결과로 보고 무시.
     const wrap = _pendingUserBubbles.shift();
     if (!wrap) return;
     _activeWrap = wrap;
-    // 메트릭 — 사용자가 보낸 원문 vs STT 인식 결과 + latency.
+    const original = wrap.querySelector('.bubble.user .text')?.textContent || '';
+    const ok = success && transcript && transcript !== 'non_voice' && transcript !== 'error';
+    const recognized = ok ? transcript : '';
+    const accuracy = original ? 1 - _cer(original, recognized) : null;
     if (_metrics) {
-      const original = wrap.querySelector('.bubble.user .text')?.textContent || '';
       _metrics.sttResults.push({
         original,
-        recognized: transcript,
+        recognized,
         latencyMs: typeof eosToFinalMs === 'number' ? eosToFinalMs : null,
       });
     }
     const annot = document.createElement('div');
-    annot.className = 'stt-annot';
-    // latency: callbot 의 EOS→Final 측정값 (server VAD 의 SPEECH_END 또는 client
-    // VAD flush 완료 → Google STT is_final 도착). Google STT 응답 시간 자체를
-    // 직접 보여줌. SSE 에 eos_to_final_ms 가 없는 경우 (구버전 호환) 만 latency 미표시.
-    const latencyTag = (typeof eosToFinalMs === 'number')
-      ? ` (${eosToFinalMs}ms)`
-      : '';
-    annot.textContent = `🎙${latencyTag} ${transcript}`;
+    annot.className = 'stt-annot' + (ok ? '' : ' stt-fail');
+    // (latency · 인식률) — latency 는 callbot 의 EOS→Final (server VAD SPEECH_END
+    // 또는 client VAD flush → Google STT is_final). 인식률은 사용자 원문 vs 인식
+    // transcript 의 1−CER (음절 단위). fail/non_voice 는 0% 로 표시.
+    const tags = [];
+    if (typeof eosToFinalMs === 'number') tags.push(`${eosToFinalMs}ms`);
+    if (accuracy != null) tags.push(`${(accuracy * 100).toFixed(1)}%`);
+    const tagStr = tags.length ? ` (${tags.join(' · ')})` : '';
+    const display = ok ? transcript : `인식 실패 (${transcript || 'fail'})`;
+    annot.textContent = `🎙${tagStr} ${display}`;
     wrap.appendChild(annot);
     els.chat.scrollTop = els.chat.scrollHeight;
   };
