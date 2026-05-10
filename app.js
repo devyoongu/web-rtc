@@ -99,6 +99,29 @@
   // 마지막 봇 bubble 후 N초 동안 신규 chunk 없으면 "응답 끝났다" 로 간주.
   let _lastBotBubbleAt = 0;
 
+  // 봇 오디오 실제 재생 종료 추정 시각 — 봇 bubble enqueue 시각만 보면
+  // RTP 로 흘러가는 봇 음성이 끝나기 전에 질의 TTS 가 겹쳐 재생될 수 있다.
+  // 봇 응답 wav (/wav/recv/...) duration 을 미리 읽어 enqueue+duration+safety
+  // 까지 "봇이 말하는 중" 으로 표시 → drain 은 이 시각 후로 미룬다.
+  let _botAudioBusyUntil = 0;
+  const BOT_AUDIO_SAFETY_MS = 500;
+
+  const _bumpBotAudioBusyUntil = (audioUrl, enqueuedAt) => {
+    if (!audioUrl) return;
+    const probe = new Audio();
+    probe.preload = 'metadata';
+    probe.addEventListener('loadedmetadata', () => {
+      if (!isFinite(probe.duration)) return;
+      const endsAt = enqueuedAt + probe.duration * 1000 + BOT_AUDIO_SAFETY_MS;
+      if (endsAt > _botAudioBusyUntil) {
+        _botAudioBusyUntil = endsAt;
+        // drain 이 이미 timer 로 걸려 있으면 새 deadline 으로 갱신.
+        if (_listeningArmed && _sendQueue.length > 0) _scheduleQuietDrain();
+      }
+    }, { once: true });
+    probe.src = audioUrl;
+  };
+
   // tts_ttfa 이벤트는 bot_text 이벤트 뒤에 한 번 더 도착하므로, 매 봇 bubble row 를
   // text 별 큐에 등록해 두고 TTFA 도착 시 FIFO 로 매칭 후 annotation 부착.
   // (max_workers=2 의 합성 시작 순서가 enqueue 순서와 어긋날 수 있지만, 같은 텍스트
@@ -136,7 +159,10 @@
   };
 
   const addBotBubble = (text, audioUrl, sttToBotMs, kind) => {
-    _lastBotBubbleAt = Date.now();
+    const enqueuedAt = Date.now();
+    _lastBotBubbleAt = enqueuedAt;
+    // 봇 오디오 실제 재생 종료 시각 갱신 — drain gate 에 사용.
+    _bumpBotAudioBusyUntil(audioUrl, enqueuedAt);
     // 봇이 새 chunk 를 보냈으므로 예약된 송신 timer 가 있다면 reset (재시작).
     if (_pendingDrainTimer) {
       clearTimeout(_pendingDrainTimer);
@@ -319,7 +345,8 @@
     addUserBubble(text, audioUrl);
     const src = audioCtx.createBufferSource();
     src.buffer = buffer;
-    src.connect(micDest);
+    src.connect(micDest);             // RTP outbound (콜봇 측에서 들리는 음성)
+    src.connect(audioCtx.destination); // 로컬 스피커 — 송신자도 함께 들음
     src.start();
     log(`TTS played: ${text.slice(0, 40)}${text.length > 40 ? '…' : ''} (${buffer.duration.toFixed(2)}s)`);
   };
@@ -389,6 +416,7 @@
       els.sendBtn.disabled = false;
       _activeWrap = null;
       _lastBotBubbleAt = 0;
+      _botAudioBusyUntil = 0;
       _listeningArmed = false;
       if (_pendingDrainTimer) { clearTimeout(_pendingDrainTimer); _pendingDrainTimer = null; }
     });
@@ -455,8 +483,12 @@
   const _scheduleQuietDrain = () => {
     if (_pendingDrainTimer) clearTimeout(_pendingDrainTimer);
     if (_sendQueue.length === 0) return;
-    const elapsedSinceBot = _lastBotBubbleAt ? Date.now() - _lastBotBubbleAt : BOT_QUIET_MS;
-    const waitMs = Math.max(0, BOT_QUIET_MS - elapsedSinceBot);
+    const now = Date.now();
+    const elapsedSinceBot = _lastBotBubbleAt ? now - _lastBotBubbleAt : BOT_QUIET_MS;
+    const quietWaitMs = Math.max(0, BOT_QUIET_MS - elapsedSinceBot);
+    // 봇이 아직 말하는 중이면 그 끝까지 기다림 — 질의 TTS 가 봇 음성에 겹치지 않게.
+    const audioWaitMs = Math.max(0, _botAudioBusyUntil - now);
+    const waitMs = Math.max(quietWaitMs, audioWaitMs);
     _pendingDrainTimer = setTimeout(() => {
       _pendingDrainTimer = null;
       _listeningArmed = false;

@@ -50,6 +50,8 @@ source ../callbot/venv/bin/activate
 pip install -r requirements.txt
 
 # 2) TTS 백엔드 (포트 8000)
+#    질의자 voice 는 봇과 구분되도록 기본 chirp3-hd-achird (남성).
+#    WEB_RTC_TTS_VOICE 환경변수로 override 가능 (예: chirp3-hd-achernar, neural2-a 등).
 uvicorn server:app --host 127.0.0.1 --port 8000
 
 # 3) 정적 파일 서버 (포트 3000) — 다른 콘솔에서

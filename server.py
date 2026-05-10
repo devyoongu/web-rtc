@@ -32,11 +32,21 @@ from pydantic import BaseModel
 _CALLBOT_DIR = Path(__file__).resolve().parent.parent / "callbot"
 sys.path.insert(0, str(_CALLBOT_DIR))
 
-from tts import synthesize_pcm_8k  # noqa: E402
+from tts import synthesize_pcm_8k, GoogleTTS  # noqa: E402
 import config as cfg  # noqa: E402
 
 
 SAMPLE_RATE = 8000
+
+# 질의자(브라우저) voice — 봇과 구분되도록 별도 GoogleTTS 인스턴스 사용.
+# 기본값 chirp3-hd-achird (남성). 봇은 cfg.GCP_TTS_VOICE 로 변경 없이 그대로.
+# 캐시 키는 voice_name 을 hash 에 포함하므로 wav/_cache/ 가 voice 별로 자동 분리.
+WEB_RTC_TTS_VOICE = os.environ.get("WEB_RTC_TTS_VOICE", "chirp3-hd-achird")
+_proxy_tts = GoogleTTS(
+    voice=WEB_RTC_TTS_VOICE,
+    language_code="ko-KR",
+    credentials_dir=cfg.CREDENTIALS_DIR,
+)
 
 # 송신/수신 WAV 보관 폴더 — callbot/tts.py 의 cache(wav/_cache/) 와 별도.
 # .gitignore 의 wav/ 로 제외됨.
@@ -113,7 +123,11 @@ class TTSRequest(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "voice": cfg.GCP_TTS_VOICE}
+    return {
+        "status": "ok",
+        "questioner_voice": _proxy_tts.voice_name,
+        "bot_voice": cfg.GCP_TTS_VOICE,
+    }
 
 
 @app.post("/tts")
@@ -126,7 +140,8 @@ def synthesize(req: TTSRequest):
 
     # callbot/tts.py 의 모듈 함수. 24kHz 합성 → anti-aliased 다운샘플 → 8kHz.
     # 디스크 캐시(wav/_cache/) 적용으로 동일 텍스트 재요청 시 GCP 호출 없음.
-    pcm_8k = synthesize_pcm_8k(text)
+    # 봇과 다른 _proxy_tts (질의자 voice) 사용.
+    pcm_8k = synthesize_pcm_8k(text, tts=_proxy_tts)
     wav = _wrap_pcm_in_wav(pcm_8k, SAMPLE_RATE)
     saved = _save_wav(wav, text, SENT_DIR)
     print(f"[TTS] Sent saved: {saved.relative_to(_BASE_DIR)} ({len(wav)} bytes)")
