@@ -99,28 +99,31 @@
   // 마지막 봇 bubble 후 N초 동안 신규 chunk 없으면 "응답 끝났다" 로 간주.
   let _lastBotBubbleAt = 0;
 
-  // tts_synth 이벤트는 bot_text 이벤트 뒤에 한 번 더 도착하므로, 매 봇 bubble row 를
-  // text 별 큐에 등록해 두고 synth_done 도착 시 FIFO 로 매칭 후 annotation 부착.
-  // (max_workers=2 의 합성 완료 순서가 enqueue 순서와 어긋날 수 있지만, 같은 텍스트
+  // tts_ttfa 이벤트는 bot_text 이벤트 뒤에 한 번 더 도착하므로, 매 봇 bubble row 를
+  // text 별 큐에 등록해 두고 TTFA 도착 시 FIFO 로 매칭 후 annotation 부착.
+  // (max_workers=2 의 합성 시작 순서가 enqueue 순서와 어긋날 수 있지만, 같은 텍스트
   //  가 한 응답 내 중복 등장하는 케이스가 드물어 텍스트 기준 매칭으로 충분.)
-  const _pendingSynthBubbles = new Map();  // text → [row, …]
+  const _pendingTtfaBubbles = new Map();  // text → [row, …]
 
-  const _registerSynthPending = (text, row) => {
-    if (!_pendingSynthBubbles.has(text)) _pendingSynthBubbles.set(text, []);
-    _pendingSynthBubbles.get(text).push(row);
+  const _registerTtfaPending = (text, row) => {
+    if (!_pendingTtfaBubbles.has(text)) _pendingTtfaBubbles.set(text, []);
+    _pendingTtfaBubbles.get(text).push(row);
   };
 
-  const attachSynthLatency = (text, synthMs) => {
-    const arr = _pendingSynthBubbles.get(text);
+  const attachTtfaLatency = (text, ttfaMs) => {
+    const arr = _pendingTtfaBubbles.get(text);
     if (!arr || !arr.length) return;
     const row = arr.shift();
-    if (!arr.length) _pendingSynthBubbles.delete(text);
+    if (!arr.length) _pendingTtfaBubbles.delete(text);
     const annot = document.createElement('div');
-    annot.className = 'bot-latency-annot synth';
-    const synthTxt = synthMs >= 1000
-      ? `${(synthMs / 1000).toFixed(2)}s`
-      : `${synthMs}ms`;
-    annot.textContent = `⚙ TTS합성 ${synthTxt}`;
+    annot.className = 'bot-latency-annot ttfa';
+    const ttfaTxt = ttfaMs >= 1000
+      ? `${(ttfaMs / 1000).toFixed(2)}s`
+      : `${ttfaMs}ms`;
+    // TTFA = Time To First Audio chunk: callbot 이 합성 시작 → 첫 8kHz 8-bit
+    // PCM chunk 가 재생 큐에 push 되기까지의 latency. 전체 합성 시간이 아닌
+    // "첫 음성이 들리기 시작할 수 있는 시점" 까지의 시간.
+    annot.textContent = `⚙ TTS TTFA ${ttfaTxt}`;
     // 해당 row 바로 아래(같은 문장에 속한 기존 annotation 다음)에 삽입.
     // row 직후에 이미 STT→bot latency 등 .bot-latency-annot 가 있으면 그 뒤로.
     let after = row;
@@ -157,9 +160,9 @@
       annot.textContent = `⏱ STT→${label} ${latencyTxt}`;
       container.appendChild(annot);
     }
-    // 모든 bot bubble 은 synth latency 가 따로 도착하므로 row 를 큐에 등록 →
-    // synth_done 시 row 직후에 annotation 삽입.
-    _registerSynthPending(text, row);
+    // 모든 bot bubble 은 TTFA latency 가 따로 도착하므로 row 를 큐에 등록 →
+    // tts_ttfa 시 row 직후에 annotation 삽입.
+    _registerTtfaPending(text, row);
     els.chat.scrollTop = els.chat.scrollHeight;
     // listening 이 미리 와서 armed 상태에서 봇 응답이 다시 온 경우, quiet
     // period 후 재시도하도록 timer 재예약.
@@ -215,10 +218,10 @@
           attachStt(data.transcript, data.success, data.eos_to_final_ms);
           return;
         }
-        // (2-1) TTS synth 완료 — 해당 봇 bubble 에 합성 latency annotation 부착.
-        if (data.type === 'tts_synth') {
-          if (typeof data.synth_ms === 'number' && data.text) {
-            attachSynthLatency(data.text, data.synth_ms);
+        // (2-1) TTS TTFA — 해당 봇 bubble 에 첫-chunk-도달 latency annotation 부착.
+        if (data.type === 'tts_ttfa') {
+          if (typeof data.ttfa_ms === 'number' && data.text) {
+            attachTtfaLatency(data.text, data.ttfa_ms);
           }
           return;
         }
