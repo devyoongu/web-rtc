@@ -17,6 +17,7 @@
     addRowBtn:   document.getElementById('addRowBtn'),
     applyAllBtn: document.getElementById('applyAllBtn'),
     multiHint:   document.getElementById('multiHint'),
+    metricsPanel: document.getElementById('metricsPanel'),
   };
 
   const log = (msg, ...rest) => {
@@ -32,6 +33,80 @@
     els.badge.dataset.state = state;
     els.badge.textContent = state;
     els.meta.textContent = meta;
+  };
+
+  // ── 통화 성능 메트릭 ──────────────────────────────────────────
+  // accepted 시 reset, ended/failed 시 패널 렌더. 4개 지표:
+  // STT 인식률 (1−CER), STT 평균 latency, TTS 평균 TTFA(>임계값), TTS 캐시 히트율.
+  // 임계값 100ms — 그 이하는 디스크 캐시 히트로 간주해 평균 TTFA 에서 제외.
+  const TTFA_CACHE_THRESHOLD_MS = 100;
+  let _metrics = null;
+
+  const _resetMetrics = () => {
+    _metrics = { sttResults: [], ttsTtfa: [] };
+  };
+
+  // 문자(코드포인트) 단위 Levenshtein. 한글 음절은 Hangul Syllables 영역의 단일
+  // 코드포인트라 [...str] split 으로 음절 단위 비교가 자연스럽다.
+  const _cer = (ref, hyp) => {
+    const a = [...(ref || '').trim()];
+    const b = [...(hyp || '').trim()];
+    if (!a.length && !b.length) return 0;
+    if (!a.length || !b.length) return 1;
+    const dp = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+    for (let i = 0; i <= a.length; i++) dp[i][0] = i;
+    for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+    for (let i = 1; i <= a.length; i++) {
+      for (let j = 1; j <= b.length; j++) {
+        dp[i][j] = a[i-1] === b[j-1]
+          ? dp[i-1][j-1]
+          : 1 + Math.min(dp[i-1][j-1], dp[i-1][j], dp[i][j-1]);
+      }
+    }
+    return dp[a.length][b.length] / Math.max(a.length, b.length);
+  };
+
+  const renderMetricsPanel = () => {
+    if (!_metrics || !els.metricsPanel) return;
+    const { sttResults, ttsTtfa } = _metrics;
+
+    const sttN = sttResults.length;
+    const accs = sttResults.map(r => 1 - _cer(r.original, r.recognized));
+    const accAvg = sttN ? accs.reduce((a, b) => a + b, 0) / sttN : 0;
+    const sttLatencies = sttResults.map(r => r.latencyMs).filter(v => typeof v === 'number');
+    const sttLatAvg = sttLatencies.length
+      ? sttLatencies.reduce((a, b) => a + b, 0) / sttLatencies.length
+      : null;
+
+    const ttsN = ttsTtfa.length;
+    const cacheHits = ttsTtfa.filter(t => t.ttfaMs <= TTFA_CACHE_THRESHOLD_MS).length;
+    const cacheRate = ttsN ? cacheHits / ttsN : 0;
+    const nonCached = ttsTtfa.filter(t => t.ttfaMs > TTFA_CACHE_THRESHOLD_MS);
+    const ttfaAvg = nonCached.length
+      ? nonCached.reduce((a, t) => a + t.ttfaMs, 0) / nonCached.length
+      : null;
+
+    const fmtMs = (v) => v == null ? '—' : v >= 1000 ? `${(v/1000).toFixed(2)}s` : `${Math.round(v)}ms`;
+    const fmtPct = (v) => `${(v * 100).toFixed(1)}%`;
+
+    els.metricsPanel.hidden = false;
+    els.metricsPanel.innerHTML = `
+      <div class="metrics-title">통화 성능 리포트</div>
+      <div class="metrics-grid">
+        <div class="metric"><div class="metric-label">STT 인식률</div>
+          <div class="metric-value">${sttN ? fmtPct(accAvg) : '—'}</div>
+          <div class="metric-sub">n=${sttN} (avg CER ${sttN ? fmtPct(1 - accAvg) : '—'})</div></div>
+        <div class="metric"><div class="metric-label">STT 평균 latency</div>
+          <div class="metric-value">${fmtMs(sttLatAvg)}</div>
+          <div class="metric-sub">n=${sttLatencies.length}</div></div>
+        <div class="metric"><div class="metric-label">TTS 평균 TTFA</div>
+          <div class="metric-value">${fmtMs(ttfaAvg)}</div>
+          <div class="metric-sub">n=${nonCached.length} (캐시 ≤${TTFA_CACHE_THRESHOLD_MS}ms 제외)</div></div>
+        <div class="metric"><div class="metric-label">TTS 캐시 히트율</div>
+          <div class="metric-value">${ttsN ? fmtPct(cacheRate) : '—'}</div>
+          <div class="metric-sub">${cacheHits}/${ttsN}</div></div>
+      </div>
+    `;
   };
 
   // ── 채팅 말풍선 ─────────────────────────────────────────────────
@@ -139,6 +214,7 @@
   };
 
   const attachTtfaLatency = (text, ttfaMs) => {
+    if (_metrics && typeof ttfaMs === 'number') _metrics.ttsTtfa.push({ ttfaMs });
     const arr = _pendingTtfaBubbles.get(text);
     if (!arr || !arr.length) return;
     const row = arr.shift();
@@ -215,6 +291,15 @@
     const wrap = _pendingUserBubbles.shift();
     if (!wrap) return;
     _activeWrap = wrap;
+    // 메트릭 — 사용자가 보낸 원문 vs STT 인식 결과 + latency.
+    if (_metrics) {
+      const original = wrap.querySelector('.bubble.user .text')?.textContent || '';
+      _metrics.sttResults.push({
+        original,
+        recognized: transcript,
+        latencyMs: typeof eosToFinalMs === 'number' ? eosToFinalMs : null,
+      });
+    }
     const annot = document.createElement('div');
     annot.className = 'stt-annot';
     // latency: callbot 의 EOS→Final 측정값 (server VAD 의 SPEECH_END 또는 client
@@ -404,6 +489,7 @@
     els.hangupBtn.disabled = true;
     _setSayDisabled(true);
     setState('registered', `as ${cfg.sipUser}@${cfg.asteriskHost}`);
+    renderMetricsPanel();
   };
 
   els.callBtn.addEventListener('click', async () => {
@@ -435,6 +521,12 @@
       _botAudioBusyUntil = 0;
       _listeningArmed = false;
       if (_pendingDrainTimer) { clearTimeout(_pendingDrainTimer); _pendingDrainTimer = null; }
+      // 새 통화 시작 — 이전 통화 메트릭/패널 클리어.
+      _resetMetrics();
+      if (els.metricsPanel) {
+        els.metricsPanel.hidden = true;
+        els.metricsPanel.innerHTML = '';
+      }
     });
     activeSession.on('confirmed', () => log('confirmed'));
     activeSession.on('ended', (e) => {
