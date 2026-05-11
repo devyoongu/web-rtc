@@ -278,12 +278,38 @@
     }
   };
 
+  // STT 결과 ↔ 보낸 user TTS 매칭. multi-query 자동화에서 한 query 의 STT 가
+  // deadline 으로 non_voice 처리 후 callbot 이 fallback ("잘 들리지 않습니다") 후
+  // 새 listening 을 emit → web-rtc 가 다음 query 보내기 → wrap 큐가 어긋남.
+  //
+  // 1) transcript 가 non_voice / error / 빈문자열 이면 wrap 을 *소비하지 않고*
+  //    null 반환 → 같은 wrap 이 다음 정상 STT 결과를 받도록 함.
+  // 2) 정상 transcript 면 pending wrap 들 중 원문 (1−CER) 유사도가 가장 높은
+  //    wrap 을 splice 로 채택. 모두 score < 0.3 이면 FIFO 폴백 (안전망).
+  const _pickBestMatch = (transcript) => {
+    if (!_pendingUserBubbles.length) return null;
+    if (!transcript || transcript === 'non_voice' || transcript === 'error') {
+      return null;
+    }
+    let bestIdx = 0;
+    let bestScore = -1;
+    _pendingUserBubbles.forEach((w, i) => {
+      const expected = w.querySelector('.bubble.user .text')?.textContent || '';
+      const score = expected ? 1 - _cer(expected, transcript) : 0;
+      if (score > bestScore) { bestScore = score; bestIdx = i; }
+    });
+    if (bestScore < 0.3) {
+      return _pendingUserBubbles.shift();
+    }
+    return _pendingUserBubbles.splice(bestIdx, 1)[0];
+  };
+
   const attachStt = (transcript, success, eosToFinalMs) => {
     // 1 listening = 1 audio send = 1 STT result 1:1 매칭. fail/non_voice/error
     // 도 wrap 을 consume — callbot 은 fail turn 에 fallback 멘트 송출 후 새
     // listening 을 emit 하고 브라우저는 그때마다 새 audio 를 큐에서 빼서 send 함.
     // 큐가 비어 있으면 callbot listening timeout 같은 후행 결과로 보고 무시.
-    const wrap = _pendingUserBubbles.shift();
+    const wrap = _pickBestMatch(transcript);
     if (!wrap) return;
     _activeWrap = wrap;
     const original = wrap.querySelector('.bubble.user .text')?.textContent || '';
