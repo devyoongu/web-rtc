@@ -42,19 +42,25 @@ sudo ufw allow 8088/tcp                       # ufw 사용 시
 
 ## 로컬 실행
 
-`../callbot/venv` 를 그대로 재사용한다 (TTS 모듈 임포트 시 callbot 의존성을 그대로 쓰기 때문).
+TTS 합성은 별도 `../tts-service` 가 담당하고, 이 서버는 콜봇 로그 tail (`/events`)
+과 봇 응답 WAV 정적 서빙만 한다. **callbot venv 와 무관한 자체 venv 사용 가능.**
 
 ```bash
-# 1) 의존성 설치 (callbot venv 안에서)
-source ../callbot/venv/bin/activate
+# 1) TTS 백엔드 (포트 8001) — 다른 콘솔
+cd ../tts-service
+python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
+uvicorn server:app --host 127.0.0.1 --port 8001
+# 자세한 옵션은 ../tts-service/README.md
 
-# 2) TTS 백엔드 (포트 8000)
-#    질의자 voice 는 봇과 구분되도록 기본 chirp3-hd-achird (남성).
-#    WEB_RTC_TTS_VOICE 환경변수로 override 가능 (예: chirp3-hd-achernar, neural2-a 등).
+# 2) 이벤트 브리지 (포트 8000)
+cd ../web-rtc
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
 uvicorn server:app --host 127.0.0.1 --port 8000
+# TTS_SERVICE_URL 환경변수로 tts-service 주소 override 가능 (default http://localhost:8001)
 
-# 3) 정적 파일 서버 (포트 3000) — 다른 콘솔에서
+# 3) 정적 파일 서버 (포트 3000) — 또 다른 콘솔
 python -m http.server 3000
 ```
 
@@ -64,7 +70,7 @@ python -m http.server 3000
 
 1. **TTS 백엔드 단독**
    ```bash
-   curl -X POST http://localhost:8000/tts \
+   curl -X POST http://localhost:8001/tts \
         -H 'Content-Type: application/json' \
         -d '{"text":"안녕하세요"}' --output /tmp/tts.wav
    afplay /tmp/tts.wav
