@@ -1,10 +1,11 @@
 // 멀티 질의 모드 — 페이지 로드 시 5개 행을 미리 채울 기본 샘플.
-// 카테고리별 대표 질의 1개씩 (skshieldus_cyber_faq.md 발췌). 사용자가 행마다
-// 자유 편집 / 추가 / 삭제 가능.
+// 영어 회화 교사(LLM) 연습용 학생 발화. 교사의 동작을 두루 보여주도록 구성:
+// 문법 오류(교정 유도) / 자연스러운 문장(대화 지속) / "how do I say"(표현 안내) /
+// 어색한 표현(교정) 을 섞음. 사용자가 행마다 자유 편집 / 추가 / 삭제 가능.
 window.DEFAULT_QUERIES = [
-  '파견보안관제와 원격관제의 차이는 무엇인가요',
-  '중소기업도 인증이 꼭 필요한가요',
-  '제로트러스트 보안이란 무엇인가요',
-  '랜섬웨어 사전 예방 방법은 무엇인가요',
-  '얼굴인식기는 실외에도 설치 가능한가요',
+  'Yesterday I go to the park and play soccer with my friend.',
+  'I had a really nice weekend with my family.',
+  "How do I say '주말 잘 보내세요' in English?",
+  'I very like watching movie in the night.',
+  'What do you recommend for practice my speaking?',
 ];
