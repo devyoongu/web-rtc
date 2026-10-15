@@ -18,7 +18,69 @@
     applyAllBtn: document.getElementById('applyAllBtn'),
     multiHint:   document.getElementById('multiHint'),
     metricsPanel: document.getElementById('metricsPanel'),
+    // 음원 볼륨 조절.
+    volumeSlider: document.getElementById('volumeSlider'),
+    muteBtn:      document.getElementById('muteBtn'),
+    volumeValue:  document.getElementById('volumeValue'),
+    // 끼어들기(barge-in) 테스트 패널.
+    bargeText:       document.getElementById('bargeText'),
+    bargeInjectBtn:  document.getElementById('bargeInjectBtn'),
+    bargeDelay:      document.getElementById('bargeDelay'),
+    bargeDelayValue: document.getElementById('bargeDelayValue'),
+    bargeAutoBtn:    document.getElementById('bargeAutoBtn'),
+    realMicToggle:   document.getElementById('realMicToggle'),
+    bargeHint:       document.getElementById('bargeHint'),
   };
+
+  // ── 음원 볼륨 조절 ─────────────────────────────────────────────
+  // 로컬 재생 3경로 — ① 콜봇 실시간 음성(remoteAudio) ② 송신 WAV 자동재생
+  // (AudioContext→스피커) ③ ▶ 버블 재생(<audio>) — 을 한 슬라이더로 제어.
+  // SIP 아웃바운드(micDest→콜봇이 듣는 소리)는 건드리지 않는다: AudioContext
+  // 로컬 경로는 outGain(GainNode)으로, <audio> 요소는 .volume 으로 반영.
+  let _volume = 1.0;      // 0.0 ~ 1.0
+  let _muted = false;
+  let _lastVolume = 1.0;  // 뮤트/0 해제 시 복원할 값
+  let outGain = null;     // ensureAudioPipeline 에서 생성
+  const _bubbleAudios = new Set();  // ▶ 재생용 <audio> 요소들
+
+  const _effectiveVolume = () => (_muted ? 0 : _volume);
+
+  const applyVolume = () => {
+    const v = _effectiveVolume();
+    if (els.remoteAudio) els.remoteAudio.volume = v;
+    if (outGain) outGain.gain.value = v;
+    _bubbleAudios.forEach((a) => { a.volume = v; });
+    if (els.volumeValue) els.volumeValue.textContent = `${Math.round(_volume * 100)}%`;
+    if (els.muteBtn) els.muteBtn.textContent = (_muted || _volume === 0) ? '🔇' : '🔊';
+    if (els.volumeSlider) els.volumeSlider.value = String(Math.round(_volume * 100));
+  };
+
+  const setVolume = (v) => {
+    _volume = Math.min(1, Math.max(0, v));
+    if (_volume > 0) { _muted = false; _lastVolume = _volume; }
+    try { localStorage.setItem('callbot_volume', String(_volume)); } catch (_) { /* ignore */ }
+    applyVolume();
+  };
+
+  // 저장된 볼륨 복원 후 UI/오디오에 반영.
+  try {
+    const saved = parseFloat(localStorage.getItem('callbot_volume'));
+    if (!Number.isNaN(saved)) { _volume = Math.min(1, Math.max(0, saved)); _lastVolume = _volume || 1.0; }
+  } catch (_) { /* ignore */ }
+  applyVolume();
+
+  els.volumeSlider?.addEventListener('input', (e) => {
+    setVolume(parseInt(e.target.value, 10) / 100);
+  });
+  els.muteBtn?.addEventListener('click', () => {
+    if (_muted || _volume === 0) {
+      _muted = false;
+      if (_volume === 0) _volume = _lastVolume || 1.0;
+    } else {
+      _muted = true;
+    }
+    applyVolume();
+  });
 
   const log = (msg, ...rest) => {
     const ts = new Date().toLocaleTimeString();
@@ -129,6 +191,8 @@
 
     const audio = audioUrl ? new Audio(audioUrl) : null;
     if (audio) {
+      audio.volume = _effectiveVolume();     // 현재 볼륨 반영 (슬라이더/뮤트)
+      _bubbleAudios.add(audio);              // 이후 볼륨 변경 시 일괄 적용 대상
       audio.addEventListener('ended', () => { btn.classList.remove('playing'); btn.textContent = '▶'; });
     } else {
       btn.disabled = true;
@@ -173,6 +237,24 @@
     els.chat.appendChild(grp);
     els.chat.scrollTop = els.chat.scrollHeight;
     _pendingUserBubbles.push(wrap);
+  };
+
+  // 끼어들기(barge-in) 이벤트를 타임라인 가운데 배지로 표시.
+  const renderBargeNote = (data) => {
+    const stage = data.stage;
+    let txt;
+    if (stage === 'ducked')        txt = `🔉 덕킹${data.detail ? ` (${data.detail})` : ''}`;
+    else if (stage === 'unducked') txt = `🔊 덕킹 해제${data.detail ? ` (${data.detail})` : ''}`;
+    else if (stage === 'confirm')  txt = `⚡ 끼어들기 확정: "${data.text}"`;
+    else if (stage === 'stop')     txt = `⛔ TTS 중단${typeof data.stop_ms === 'number' ? ` (${data.stop_ms}ms)` : ''}`;
+    else if (stage === 'handoff')  txt = `↪ 다음 턴 인계: ${data.text}`;
+    else                           txt = `barge: ${stage}`;
+    const note = document.createElement('div');
+    note.className = `system-note barge ${stage}`;
+    note.textContent = txt;
+    els.chat.appendChild(note);
+    els.chat.scrollTop = els.chat.scrollHeight;
+    log(`barge-in: ${txt}`);
   };
 
   // 봇 응답 quiet period 추적 — 봇 chunk 가 multi-part 로 도착하므로,
@@ -359,11 +441,18 @@
           attachStt(data.transcript, data.success, data.eos_to_final_ms);
           return;
         }
+        // (2-2) 끼어들기(barge-in) 이벤트 — 타임라인에 배지.
+        if (data.type === 'barge') {
+          renderBargeNote(data);
+          return;
+        }
         // (2-1) TTS TTFA — 해당 봇 bubble 에 첫-chunk-도달 latency annotation 부착.
         if (data.type === 'tts_ttfa') {
           if (typeof data.ttfa_ms === 'number' && data.text) {
             attachTtfaLatency(data.text, data.ttfa_ms);
           }
+          // 봇 발화 시작 신호 — 끼어들기 자동 주입(지연 슬라이더)의 트리거.
+          window.dispatchEvent(new CustomEvent('callbot:botspeech'));
           return;
         }
         // (3) 봇 응답 텍스트
@@ -394,6 +483,11 @@
       // 서버가 8kHz WAV 를 내려주므로 decodeAudioData 도 리샘플링 없이 통과.
       audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 8000 });
       micDest = audioCtx.createMediaStreamDestination();
+      // 로컬 스피커 출력용 볼륨 게인 — 슬라이더로 제어. micDest(SIP 아웃바운드)
+      // 에는 연결하지 않으므로 볼륨 조절이 콜봇이 듣는 소리에는 영향 없음.
+      outGain = audioCtx.createGain();
+      outGain.gain.value = _effectiveVolume();
+      outGain.connect(audioCtx.destination);
       // 인코더 keep-warm: 0 신호를 항상 흘려 RTP 송출이 50pps 로 유지되게 함.
       // (Send 사이 무신호 구간에 WebRTC 인코더가 throttle/idle 되어 callbot 측에
       //  RTP 가 ~60ms 간격으로 도착하던 것을 일정 cadence 로 보정.)
@@ -460,8 +554,8 @@
     addUserBubble(text, audioUrl);
     const src = audioCtx.createBufferSource();
     src.buffer = buffer;
-    src.connect(micDest);             // RTP outbound (콜봇 측에서 들리는 음성)
-    src.connect(audioCtx.destination); // 로컬 스피커 — 송신자도 함께 들음
+    src.connect(micDest);             // RTP outbound (콜봇 측에서 들리는 음성) — 볼륨 무관
+    src.connect(outGain);             // 로컬 스피커 — 송신자도 함께 들음 (볼륨 슬라이더 적용)
     src.start();
     log(`TTS played: ${text.slice(0, 40)}${text.length > 40 ? '…' : ''} (${buffer.duration.toFixed(2)}s)`);
   };
@@ -506,13 +600,20 @@
       els.multiRows.querySelectorAll('input').forEach(i => i.disabled = disabled);
       els.multiRows.querySelectorAll('.delete-row-btn').forEach(b => b.disabled = disabled);
     }
+    // 끼어들기 주입 컨트롤도 통화 중에만 활성. 단 실마이크 토글은 통화 전에
+    // 골라야 하므로 반대로 — 통화 중엔 잠근다(아래 callBtn/onCallEnded).
+    if (els.bargeText)      els.bargeText.disabled      = disabled;
+    if (els.bargeInjectBtn) els.bargeInjectBtn.disabled = disabled;
+    if (els.bargeAutoBtn)   els.bargeAutoBtn.disabled   = disabled;
   };
 
   const onCallEnded = () => {
     activeSession = null;
+    _bargeAutoArmed = false;
     els.callBtn.disabled = false;
     els.hangupBtn.disabled = true;
     _setSayDisabled(true);
+    if (els.realMicToggle) els.realMicToggle.disabled = false;  // 다음 통화 전 모드 선택 가능
     setState('registered', `as ${cfg.sipUser}@${cfg.asteriskHost}`);
     renderMetricsPanel();
   };
@@ -528,14 +629,31 @@
     const target = `sip:${cfg.callExtension}@${cfg.asteriskHost}`;
     log(`Calling ${target}`);
 
+    // 아웃바운드 스트림 선택:
+    //  - 기본(합성): micDest.stream — 타이핑→TTS 주입 경로. 봇 목소리가 되돌지
+    //    않아 끼어들기 기능 검증에 적합(self-barge 재현 불가).
+    //  - 실마이크 모드: getUserMedia 실제 마이크 — self-barge(에코) 실측용.
+    //    스피커 ON 상태에서 봇 음성이 마이크로 유입되는지 본다.
+    let outboundStream = micDest.stream;
+    if (els.realMicToggle?.checked) {
+      try {
+        outboundStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        log('🎤 실마이크 모드: getUserMedia 트랙 사용 (self-barge 실측). 합성 주입은 콜봇에 전달되지 않음.');
+        if (els.bargeHint) els.bargeHint.textContent = '실마이크 모드 — 주입 대신 스피커 에코로 self-barge 관찰';
+      } catch (e) {
+        log('getUserMedia 실패 — 합성 마이크로 폴백', e.message);
+      }
+    }
+
     activeSession = ua.call(target, {
-      mediaStream: micDest.stream,                         // ★ TTS 출력 = 마이크
+      mediaStream: outboundStream,                         // ★ 송신 오디오 소스
       mediaConstraints: { audio: false, video: false },
       pcConfig: { iceServers: cfg.iceServers },
     });
 
     els.callBtn.disabled = true;
     els.hangupBtn.disabled = false;
+    if (els.realMicToggle) els.realMicToggle.disabled = true;  // 통화 중 모드 변경 금지
 
     activeSession.on('progress', () => log('progress'));
     activeSession.on('accepted', () => {
@@ -732,6 +850,65 @@
     }
     if (els.multiHint) els.multiHint.textContent = `${queries.length}건 큐잉`;
     log(`Multi-apply: ${queries.length} queries queued`);
+  });
+
+  // ── 끼어들기(barge-in) 테스트 주입 ───────────────────────────────
+  // 기능 검증용. send()/멀티질의와 달리 _sendQueue·quiet 스케줄러를 거치지
+  // 않고 playPrefetched() 를 직접 호출해 봇 발화 중에도 즉시 주입한다.
+  // (합성 micDest 경로 전용 — 실마이크 모드에선 콜봇에 전달되지 않는다.)
+  let _bargeAutoArmed = false;
+
+  const _bargeDelayMs = () => {
+    const v = parseInt(els.bargeDelay?.value ?? '1000', 10);
+    return Number.isNaN(v) ? 1000 : v;
+  };
+
+  const injectBargeIn = async (text) => {
+    if (!activeSession) { log('끼어들기 주입: 통화 중이 아님'); return; }
+    const t = (text || '').trim();
+    if (!t) { log('끼어들기 주입: 발화가 비어있음'); return; }
+    if (els.realMicToggle?.checked) {
+      log('⚠ 끼어들기 주입 무시: 실마이크 모드 — 합성 주입은 콜봇에 전달되지 않음');
+      return;
+    }
+    log(`⚡ 끼어들기 주입: ${t}`);
+    const data = await getOrPrefetchTTS(t);
+    if (!data) { log('끼어들기 주입: prefetch 실패'); return; }
+    await playPrefetched(data);   // 스케줄러 우회 — 즉시 src.start()
+  };
+
+  els.bargeDelay?.addEventListener('input', () => {
+    if (els.bargeDelayValue) els.bargeDelayValue.textContent = `${(_bargeDelayMs() / 1000).toFixed(1)}s`;
+  });
+
+  els.bargeInjectBtn?.addEventListener('click', () => {
+    if (els.bargeInjectBtn.disabled) return;
+    injectBargeIn(els.bargeText?.value);
+  });
+  els.bargeText?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) injectBargeIn(els.bargeText.value);
+  });
+
+  // 자동 주입: 무장 후 다음 봇 발화 시작(callbot:botspeech) + 슬라이더 지연에
+  // 1회 주입하고 해제. 타이밍 재현성을 위해 수동 클릭 대신 사용.
+  els.bargeAutoBtn?.addEventListener('click', () => {
+    if (els.bargeAutoBtn.disabled) return;
+    _bargeAutoArmed = true;
+    log(`끼어들기 자동 주입 무장 — 다음 봇 발화 ${(_bargeDelayMs() / 1000).toFixed(1)}s 후 1회`);
+    if (els.bargeHint) els.bargeHint.textContent = '무장됨 — 다음 봇 발화 대기';
+  });
+  window.addEventListener('callbot:botspeech', () => {
+    if (!_bargeAutoArmed) return;
+    _bargeAutoArmed = false;
+    const d = _bargeDelayMs();
+    log(`봇 발화 감지 → ${d}ms 후 주입`);
+    if (els.bargeHint) els.bargeHint.textContent = '';
+    setTimeout(() => injectBargeIn(els.bargeText?.value), d);
+  });
+
+  // 통화 중 실마이크 토글 변경 경고(적용은 다음 통화부터).
+  els.realMicToggle?.addEventListener('change', () => {
+    if (activeSession) log('⚠ 실마이크 모드는 다음 통화부터 적용됩니다 (현재 통화는 그대로).');
   });
 
   ua.start();

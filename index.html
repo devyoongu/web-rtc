@@ -19,6 +19,12 @@
     <section class="controls">
       <button id="callBtn">Call 2001</button>
       <button id="hangupBtn" disabled>Hang up</button>
+      <div class="volume-control" title="음원 볼륨 조절">
+        <button id="muteBtn" type="button" class="secondary" aria-label="음소거 토글">🔊</button>
+        <input id="volumeSlider" type="range" min="0" max="100" step="1" value="100"
+               aria-label="볼륨" />
+        <span id="volumeValue" class="volume-value">100%</span>
+      </div>
     </section>
 
     <section class="chat" id="chat" aria-label="대화 내역"></section>
@@ -44,6 +50,31 @@
       <div class="multi-actions">
         <button id="addRowBtn" type="button" class="secondary" disabled>+ 행 추가</button>
         <button id="applyAllBtn" disabled>적용</button>
+      </div>
+    </section>
+
+    <section class="barge-test">
+      <div class="multi-header">
+        <h3 class="multi-title">끼어들기(barge-in) 테스트 — 겹침-방지 스케줄러 우회 즉시 주입</h3>
+        <span class="multi-hint" id="bargeHint"></span>
+      </div>
+      <div class="say">
+        <input id="bargeText" type="text"
+               placeholder="끼어들 발화 (예: 보일러가 고장났어요)"
+               value="보일러가 고장났어요" disabled />
+        <button id="bargeInjectBtn" disabled title="봇 발화 중 눌러 즉시 주입">지금 주입</button>
+      </div>
+      <div class="barge-actions">
+        <label class="barge-delay" title="봇 발화가 시작되면 이만큼 뒤 자동 주입">
+          봇 발화 후
+          <input id="bargeDelay" type="range" min="0" max="5000" step="100" value="1000" />
+          <span id="bargeDelayValue">1.0s</span>
+        </label>
+        <button id="bargeAutoBtn" type="button" class="secondary" disabled>자동 주입 (봇 발화 후, 1회)</button>
+        <label class="barge-realmic"
+               title="self-barge(에코) 실측용: 통화 시 실제 마이크를 아웃바운드로 사용. 이 모드에선 합성 주입이 콜봇에 전달되지 않음.">
+          <input id="realMicToggle" type="checkbox" /> 실마이크 모드 (self-barge)
+        </label>
       </div>
     </section>
 

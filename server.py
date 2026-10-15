@@ -49,6 +49,13 @@ STT_RESULT_RE = re.compile(
     r"(?:, (?:serverEND|clientEOS)_to_final=(\d+)ms)?"
 )
 
+# 끼어들기(barge-in) 이벤트 — callbot 의 INFO 로그를 타임라인 배지로 중계.
+# (BARGE_IN_ENABLE=yes 일 때만 발생. 소스: barge_in_controller / detector / call_handler.)
+BARGE_CONFIRM_RE = re.compile(r"GATE3 PASS -> BARGE-IN confirmed: '(.+?)'")
+BARGE_DUCK_RE    = re.compile(r"TTS (ducked|unducked)(?: \((.+?)\))?")
+BARGE_STOP_RE    = re.compile(r"TTS STOPPED \((.+?)\)(?: stop=(\d+)ms)?")
+BARGE_HANDOFF_RE = re.compile(r"Barge-in during reply .* uses (.+)$")
+
 app = FastAPI(title="web-rtc events bridge")
 
 app.add_middleware(
@@ -113,6 +120,31 @@ async def events():
                         continue
                     if LISTENING_RE.search(line):
                         yield f"data: {json.dumps({'type': 'listening'})}\n\n"
+                        continue
+                    # 끼어들기 이벤트 (ducked/unducked/confirm/stop/handoff).
+                    m_bc = BARGE_CONFIRM_RE.search(line)
+                    if m_bc:
+                        payload = {"type": "barge", "stage": "confirm", "text": m_bc.group(1)}
+                        yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                        continue
+                    m_bs = BARGE_STOP_RE.search(line)
+                    if m_bs:
+                        payload = {"type": "barge", "stage": "stop", "detail": m_bs.group(1)}
+                        if m_bs.group(2):
+                            payload["stop_ms"] = int(m_bs.group(2))
+                        yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                        continue
+                    m_bh = BARGE_HANDOFF_RE.search(line)
+                    if m_bh:
+                        payload = {"type": "barge", "stage": "handoff", "text": m_bh.group(1).strip()}
+                        yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                        continue
+                    m_bd = BARGE_DUCK_RE.search(line)
+                    if m_bd:
+                        payload = {"type": "barge", "stage": m_bd.group(1)}
+                        if m_bd.group(2):
+                            payload["detail"] = m_bd.group(2)
+                        yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
                         continue
                     m_ttfa = TTS_TTFA_RE.search(line)
                     if m_ttfa:

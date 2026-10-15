@@ -34,6 +34,11 @@ h1 { margin: 0 0 16px; font-size: 22px; }
 .meta { font-size: 12px; color: #666; }
 
 .controls, .say { display: flex; gap: 8px; margin: 12px 0; }
+.controls { align-items: center; }
+.volume-control { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.volume-control #muteBtn { padding: 6px 10px; font-size: 16px; line-height: 1; }
+.volume-control input[type="range"] { width: 110px; cursor: pointer; }
+.volume-value { font-size: 12px; color: #667; min-width: 34px; text-align: right; }
 .say input { flex: 1; padding: 10px 12px; border: 1px solid #ccd; border-radius: 8px; font-size: 14px; }
 button {
   padding: 10px 16px;
@@ -284,6 +289,44 @@ button.secondary {
 button.secondary:hover:not(:disabled) {
   background: #eaf1ff;
 }
+
+/* ── 끼어들기(barge-in) 테스트 패널 ───────────────────── */
+.barge-test {
+  margin: 12px 0 4px;
+  padding: 14px 16px 16px;
+  background: #fff7f2;            /* 테스트 도구 구분용 따뜻한 틴트 */
+  border: 1px solid #f3d9c8;
+  border-radius: 12px;
+}
+.barge-test .say { margin: 0 0 10px; }
+.barge-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 13px;
+  color: #6b4a33;
+}
+.barge-actions button { padding: 8px 14px; font-size: 13px; }
+.barge-delay { display: flex; align-items: center; gap: 6px; }
+.barge-delay input[type="range"] { width: 120px; }
+.barge-realmic { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+
+/* 끼어들기 타임라인 배지 (chat 가운데) */
+.system-note.barge {
+  align-self: center;
+  margin: 4px auto;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: #92400e;
+  background: #fff3e0;
+  border: 1px solid #f3d9a0;
+  border-radius: 999px;
+  text-align: center;
+}
+.system-note.barge.confirm,
+.system-note.barge.stop { color: #9a2a2a; background: #fdecec; border-color: #f3c0c0; }
+.system-note.barge.handoff { color: #1d5e3a; background: #e8f6ee; border-color: #bfe3cd; }
 
 /* ── Log (collapsible) ───────────────────────────────── */
 .log-details { margin-top: 16px; }
