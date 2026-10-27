@@ -549,6 +549,21 @@
     return promise;
   };
 
+  // [DEBUG] AudioBuffer 통계 — 디코드 결과가 유효한 파형인지 확인용.
+  const _bufferStats = (buffer) => {
+    const ch = buffer.getChannelData(0);
+    let mn = Infinity, mx = -Infinity, sumsq = 0;
+    const N = ch.length;
+    for (let i = 0; i < N; i++) {
+      const v = ch[i];
+      if (v < mn) mn = v;
+      if (v > mx) mx = v;
+      sumsq += v * v;
+    }
+    const rms = N ? Math.sqrt(sumsq / N) : 0;
+    return { N, mn: mn.toFixed(4), mx: mx.toFixed(4), rms: rms.toFixed(4) };
+  };
+
   const playPrefetched = async ({ text, audioUrl, buffer }) => {
     await ensureAudioPipeline();
     addUserBubble(text, audioUrl);
@@ -557,6 +572,13 @@
     src.connect(micDest);             // RTP outbound (콜봇 측에서 들리는 음성) — 볼륨 무관
     src.connect(outGain);             // 로컬 스피커 — 송신자도 함께 들음 (볼륨 슬라이더 적용)
     src.start();
+    // [DEBUG] 주입 시점의 ctx/버퍼/트랙 상태를 한 줄로 — 포화/무음 원인 추적.
+    const st = _bufferStats(buffer);
+    const trk = micDest.stream.getAudioTracks()[0];
+    log(`[DBG] play "${text.slice(0, 24)}" ctx=${audioCtx.sampleRate}Hz/${audioCtx.state} `
+      + `buf=${buffer.sampleRate}Hz×${buffer.numberOfChannels}ch dur=${buffer.duration.toFixed(2)}s `
+      + `samp[min=${st.mn} max=${st.mx} rms=${st.rms}] `
+      + `track=${trk ? trk.readyState + '/en=' + trk.enabled + '/mute=' + trk.muted : 'NONE'}`);
     log(`TTS played: ${text.slice(0, 40)}${text.length > 40 ? '…' : ''} (${buffer.duration.toFixed(2)}s)`);
   };
 
