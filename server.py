@@ -36,18 +36,28 @@ RECV_DIR = _BASE_DIR / "wav" / "recv"
 # 콜봇 로그 경로 — main.py 를 `> /tmp/callbot.log 2>&1` 로 띄우는 패턴 가정.
 LOG_PATH = Path(os.environ.get("CALLBOT_LOG_PATH", "/tmp/callbot.log"))
 
-# 로그 라인 정규식 (이전과 동일).
-TTS_ENQUEUE_RE = re.compile(r"TTS enqueue: '(.+?)'")
+# 로그 라인 정규식.
+# 콜봇은 텍스트를 repr()/!r 로 찍으므로 아포스트로피가 든 문장은 큰따옴표
+# ("Hi! Let's..."), 없으면 작은따옴표('Great job...') 로 감싼다. 따옴표 문자를
+# 캡처(group 1)해 백레퍼런스로 닫는 쪽을 맞춘다 — 두 스타일 모두 매칭.
+TTS_ENQUEUE_RE = re.compile(r"TTS enqueue: (['\"])(.+?)\1")
 TTS_EXTRAS_STT_RE  = re.compile(r"stt_to_bot=(\d+)ms")
 TTS_EXTRAS_KIND_RE = re.compile(r"kind=(\w+)")
 TTS_TTFA_RE = re.compile(
-    r"TTS TTFA: '(.+?)' \(ttfa=(\d+)ms(?:, kind=(\w+))?\)"
+    r"TTS TTFA: (['\"])(.+?)\1 \(ttfa=(\d+)ms(?:, kind=(\w+))?\)"
 )
 LISTENING_RE = re.compile(r"Turn \d+: Listening\.\.\.")
 STT_RESULT_RE = re.compile(
     r"STT result: success=(True|False), transcript='(.+?)'"
     r"(?:, (?:serverEND|clientEOS)_to_final=(\d+)ms)?"
 )
+
+# 끼어들기(barge-in) 이벤트 — callbot 의 INFO 로그를 타임라인 배지로 중계.
+# (BARGE_IN_ENABLE=yes 일 때만 발생. 소스: barge_in_controller / detector / call_handler.)
+BARGE_CONFIRM_RE = re.compile(r"GATE3 PASS -> BARGE-IN confirmed: '(.+?)'")
+BARGE_DUCK_RE    = re.compile(r"TTS (ducked|unducked)(?: \((.+?)\))?")
+BARGE_STOP_RE    = re.compile(r"TTS STOPPED \((.+?)\)(?: stop=(\d+)ms)?")
+BARGE_HANDOFF_RE = re.compile(r"Barge-in during reply .* uses (.+)$")
 
 app = FastAPI(title="web-rtc events bridge")
 
@@ -114,15 +124,40 @@ async def events():
                     if LISTENING_RE.search(line):
                         yield f"data: {json.dumps({'type': 'listening'})}\n\n"
                         continue
+                    # 끼어들기 이벤트 (ducked/unducked/confirm/stop/handoff).
+                    m_bc = BARGE_CONFIRM_RE.search(line)
+                    if m_bc:
+                        payload = {"type": "barge", "stage": "confirm", "text": m_bc.group(1)}
+                        yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                        continue
+                    m_bs = BARGE_STOP_RE.search(line)
+                    if m_bs:
+                        payload = {"type": "barge", "stage": "stop", "detail": m_bs.group(1)}
+                        if m_bs.group(2):
+                            payload["stop_ms"] = int(m_bs.group(2))
+                        yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                        continue
+                    m_bh = BARGE_HANDOFF_RE.search(line)
+                    if m_bh:
+                        payload = {"type": "barge", "stage": "handoff", "text": m_bh.group(1).strip()}
+                        yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                        continue
+                    m_bd = BARGE_DUCK_RE.search(line)
+                    if m_bd:
+                        payload = {"type": "barge", "stage": m_bd.group(1)}
+                        if m_bd.group(2):
+                            payload["detail"] = m_bd.group(2)
+                        yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                        continue
                     m_ttfa = TTS_TTFA_RE.search(line)
                     if m_ttfa:
                         payload = {
                             "type": "tts_ttfa",
-                            "text": m_ttfa.group(1),
-                            "ttfa_ms": int(m_ttfa.group(2)),
+                            "text": m_ttfa.group(2),
+                            "ttfa_ms": int(m_ttfa.group(3)),
                         }
-                        if m_ttfa.group(3):
-                            payload["kind"] = m_ttfa.group(3)
+                        if m_ttfa.group(4):
+                            payload["kind"] = m_ttfa.group(4)
                         yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
                         continue
                     m_stt = STT_RESULT_RE.search(line)
@@ -137,7 +172,7 @@ async def events():
                     m = TTS_ENQUEUE_RE.search(line)
                     if not m:
                         continue
-                    text = m.group(1)
+                    text = m.group(2)
                     saved = await _prefetch_recv_wav(client, text)
                     payload = {"type": "bot_text", "text": text}
                     if saved is not None:
